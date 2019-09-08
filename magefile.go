@@ -1,7 +1,7 @@
 // +build mage
 
 /*
- * Copyright (C) 2019 The "MysteriumNetwork/openvp-forwarder" Authors.
+ * Copyright (C) 2019 The "MysteriumNetwork/openvpn-forwarder" Authors.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
