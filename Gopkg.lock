@@ -17,12 +17,40 @@
   pruneopts = "UT"
   revision = "06d84117953b22058c096b49a429ebd4f3d3d97b"
 
+[[projects]]
+  digest = "1:f4e64bb62274202b95403b8ae001d0601cee01afadf60767fb0e1d239f8f1413"
+  name = "github.com/magefile/mage"
+  packages = [
+    "internal",
+    "mage",
+    "mg",
+    "parse",
+    "sh",
+  ]
+  pruneopts = "UT"
+  revision = "aedfce64c122eef47009b7f80c9771044753215d"
+  version = "v1.8.0"
+
+[[projects]]
+  branch = "master"
+  digest = "1:a6b0ade35bc762bd442d162e4a44833bb6fb86342d3612c5a417e5f66f68d2cc"
+  name = "github.com/mysteriumnetwork/go-ci"
+  packages = [
+    "commands",
+    "util",
+  ]
+  pruneopts = "UT"
+  revision = "267593de918bebe3969e737ac4cc8d3bebcb9b6e"
+
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
     "github.com/elazarl/goproxy",
     "github.com/inconshreveable/go-vhost",
+    "github.com/magefile/mage/mage",
+    "github.com/magefile/mage/sh",
+    "github.com/mysteriumnetwork/go-ci/commands",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1
