@@ -23,6 +23,9 @@ import (
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
 	"github.com/mysteriumnetwork/go-ci/commands"
+
+	// mage:import
+	_ "github.com/mysteriumnetwork/openvpn-forwarder/ci/commands"
 )
 
 const buildPath = "./build/forwarder"
