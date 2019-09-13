@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
 )
 
@@ -32,11 +33,16 @@ var (
 )
 
 // TestE2E runs end-to-end test
-func TestE2E() error {
+func TestE2E() {
 	dockerCompose("up", "-d")
 	defer dockerCompose("down")
 
-	originalIP := checkIP()
+	mg.Deps(TestE2EHTTP, TestE2EHTTPS)
+}
+
+// TestE2EHTTPS runs end-to-end test for HTTPS traffic forwarding
+func TestE2EHTTPS() error {
+	originalIP := checkIP("https://api.ipify.org/?format=text")
 	fmt.Println("Original IP:", originalIP)
 
 	redirectRule := []string{"OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "443", "-j", "REDIRECT", "--to-ports", "8081"}
@@ -45,7 +51,7 @@ func TestE2E() error {
 	}
 	defer ipTablesDelete(redirectRule...)
 
-	currentIP := checkIP()
+	currentIP := checkIP("https://api.ipify.org/?format=text")
 	fmt.Println("Current IP:", currentIP)
 
 	if currentIP == originalIP {
@@ -55,8 +61,29 @@ func TestE2E() error {
 	return nil
 }
 
-func checkIP() string {
-	ip, err := dockerComposeOut("exec", "forwarder", "wget", "-q", "-O", "-", "https://api.ipify.org/?format=text")
+// TestE2EHTTP runs end-to-end test for HTTP traffic forwarding
+func TestE2EHTTP() error {
+	originalIP := checkIP("http://api.ipify.org/?format=text")
+	fmt.Println("Original IP:", originalIP)
+
+	redirectRule := []string{"OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"}
+	if err := ipTablesAppend(redirectRule...); err != nil {
+		return err
+	}
+	defer ipTablesDelete(redirectRule...)
+
+	currentIP := checkIP("http://api.ipify.org/?format=text")
+	fmt.Println("Current IP:", currentIP)
+
+	if currentIP == originalIP {
+		return errors.New("request proxying failed")
+	}
+	fmt.Printf("Request successfuly proxied: %s -> %s", originalIP, currentIP)
+	return nil
+}
+
+func checkIP(apiURL string) string {
+	ip, err := dockerComposeOut("exec", "forwarder", "wget", "-q", "-O", "-", apiURL)
 	if err != nil {
 		panic(err)
 	}

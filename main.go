@@ -20,18 +20,17 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"fmt"
+	"flag"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
 
-	"flag"
-
 	"strings"
 
 	"github.com/elazarl/goproxy"
 	"github.com/inconshreveable/go-vhost"
+	"github.com/mysteriumnetwork/openvpn-forwarder/proxy"
 )
 
 var proxyHTTPAddr = flag.String("proxy.http-bind", ":8080", "HTTP proxy address for incoming connections")
@@ -42,6 +41,12 @@ var filterDomains = flag.String("filter.domains", "", `Filter which domains to f
 func main() {
 	flag.Parse()
 
+	temp := goproxy.NewProxyHttpServer()
+	upstreamDialer := temp.NewConnectDialToProxy(*proxyUpstreamURL)
+	if upstreamDialer == nil {
+		log.Fatalf("Invalid upstream URL: %s", *proxyUpstreamURL)
+	}
+
 	var forwardConditions []goproxy.ReqCondition
 	if *filterDomains != "" {
 		proxyFilterDomainsArr := strings.Split(*filterDomains, ",")
@@ -50,49 +55,11 @@ func main() {
 		}
 	}
 
-	proxy := goproxy.NewProxyHttpServer()
-	proxy.Verbose = true
-	proxy.Tr.Proxy = func(req *http.Request) (*url.URL, error) {
-		return url.Parse(*proxyUpstreamURL)
-	}
-	proxy.ConnectDial = proxy.NewConnectDialToProxy(*proxyUpstreamURL)
-	proxy.NonproxyHandler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Host == "" {
-			fmt.Fprintln(w, "Cannot handle requests without Host header, e.g., HTTP 1.0")
-			return
-		}
-		req.URL.Scheme = "http"
-		req.URL.Host = req.Host
-		proxy.ServeHTTP(w, req)
-	})
-
-	proxy.OnRequest(forwardConditions...).DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		conn, err := net.Dial("tcp", *proxyUpstreamURL)
-		if err != nil {
-			return req, nil
-		}
-
-		connectReq, err := http.NewRequest(http.MethodConnect, "", nil)
-		connectReq.URL.Opaque = req.Host + ":80"
-		if err != nil {
-			return req, nil
-		}
-
-		connectReq.Write(conn)
-		bufio.NewReader(conn).ReadLine()
-		req.Write(conn)
-
-		resp, err := http.ReadResponse(bufio.NewReader(conn), req)
-		if err != nil {
-			return req, nil
-		}
-
-		return req, resp
-	})
+	proxyServer := proxy.NewServer(upstreamDialer, forwardConditions...)
 	log.Print("Serving HTTP proxy on ", *proxyHTTPAddr)
-	go http.ListenAndServe(*proxyHTTPAddr, proxy)
+	go http.ListenAndServe(*proxyHTTPAddr, proxyServer)
 
-	log.Print("Serving HTTPS proxy on ", *proxyHTTPSAddr)
+	log.Print("Serving HTTPS proxyServer on ", *proxyHTTPSAddr)
 	ln, err := net.Listen("tcp", *proxyHTTPSAddr)
 	if err != nil {
 		log.Fatalf("Error listening for https connections - %v", err)
@@ -122,7 +89,7 @@ func main() {
 				Header: make(http.Header),
 			}
 			resp := dumbResponseWriter{tlsConn}
-			proxy.ServeHTTP(resp, connectReq)
+			proxyServer.ServeHTTP(resp, connectReq)
 		}(c)
 	}
 }
