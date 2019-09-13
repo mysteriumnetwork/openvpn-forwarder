@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2019 The "MysteriumNetwork/openvpn-forwarder" Authors.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 package main
 
 import (
@@ -9,17 +26,36 @@ import (
 	"net/http"
 	"net/url"
 
+	"flag"
+
+	"strings"
+
 	"github.com/elazarl/goproxy"
 	"github.com/inconshreveable/go-vhost"
 )
 
+var proxyHTTPAddr = flag.String("proxy.http-bind", ":8080", "HTTP proxy address for incoming connections")
+var proxyHTTPSAddr = flag.String("proxy.https-bind", ":8081", "HTTPS proxy address for incoming connections")
+var proxyUpstreamURL = flag.String("proxy.upstream-url", "http://superproxy.com:8080", "Upstream HTTPS proxy where to forward traffic")
+var filterDomains = flag.String("filter.domains", "", `Filter which domains to forward (separated by comma - "ipinfo.io,ipify.org")`)
+
 func main() {
+	flag.Parse()
+
+	var forwardConditions []goproxy.ReqCondition
+	if *filterDomains != "" {
+		proxyFilterDomainsArr := strings.Split(*filterDomains, ",")
+		if len(proxyFilterDomainsArr) > 0 {
+			forwardConditions = append(forwardConditions, goproxy.ReqHostIs(proxyFilterDomainsArr...))
+		}
+	}
+
 	proxy := goproxy.NewProxyHttpServer()
 	proxy.Verbose = true
 	proxy.Tr.Proxy = func(req *http.Request) (*url.URL, error) {
-		return url.Parse("http://superproxy.com:8080")
+		return url.Parse(*proxyUpstreamURL)
 	}
-	proxy.ConnectDial = proxy.NewConnectDialToProxy("http://superproxy.com:8080")
+	proxy.ConnectDial = proxy.NewConnectDialToProxy(*proxyUpstreamURL)
 	proxy.NonproxyHandler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Host == "" {
 			fmt.Fprintln(w, "Cannot handle requests without Host header, e.g., HTTP 1.0")
@@ -30,8 +66,8 @@ func main() {
 		proxy.ServeHTTP(w, req)
 	})
 
-	proxy.OnRequest(goproxy.ReqHostIs("ipinfo.io")).DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		conn, err := net.Dial("tcp", "http://superproxy.com:8080")
+	proxy.OnRequest(forwardConditions...).DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		conn, err := net.Dial("tcp", *proxyUpstreamURL)
 		if err != nil {
 			return req, nil
 		}
@@ -53,9 +89,11 @@ func main() {
 
 		return req, resp
 	})
-	go http.ListenAndServe(":3129", proxy)
+	log.Print("Serving HTTP proxy on ", *proxyHTTPAddr)
+	go http.ListenAndServe(*proxyHTTPAddr, proxy)
 
-	ln, err := net.Listen("tcp", ":3130")
+	log.Print("Serving HTTPS proxy on ", *proxyHTTPSAddr)
+	ln, err := net.Listen("tcp", *proxyHTTPSAddr)
 	if err != nil {
 		log.Fatalf("Error listening for https connections - %v", err)
 	}
