@@ -25,39 +25,29 @@ import (
 	"sync"
 	"testing"
 
-	"net/http/httptest"
-
 	"github.com/stretchr/testify/assert"
 )
 
-func Test_Server_ServeHTTP(t *testing.T) {
-	t.Skip()
+func Test_dialerHTTPConnect_DialCreatesValidRequest(t *testing.T) {
+	server := proxyServerStub{}
+	server.run()
+	defer server.stop()
 
-	upstreamServer := upstreamServerStub{}
-	upstreamServer.run()
-	defer upstreamServer.stop()
+	dialer := &dialerHTTPConnect{forwardDialer: DialerDirect, forwardAddress: ":6969"}
+	conn, err := dialer.Dial("tcp", "domain.com:80")
+	assert.NotNil(t, conn)
+	assert.NoError(t, err)
 
-	upstreamDialer := NewDialerHTTPConnect(DialerDirect, "http://localhost:6969")
-
-	req, _ := http.NewRequest("GET", "http://domain.com", nil)
-	resp := httptest.NewRecorder()
-
-	proxyServer := NewServer(upstreamDialer)
-	proxyServer.ServeHTTP(resp, req)
-
-	t.Log(resp.Code)
-	t.Log(resp.Body.String())
-
-	upstreamReq := upstreamServer.getLastRequest()
-	assert.NoError(t, upstreamServer.getLastError())
-	assert.Equal(t, "HTTP/1.1", upstreamReq.Proto)
-	assert.Equal(t, "CONNECT", upstreamReq.Method)
-	assert.Equal(t, &url.URL{Host: "domain.com:80"}, upstreamReq.URL)
-	assert.Equal(t, "domain.com:80", upstreamReq.Host)
-	assert.Equal(t, "domain.com:80", upstreamReq.RequestURI)
+	req := server.getLastRequest()
+	assert.NoError(t, server.getLastError())
+	assert.Equal(t, "HTTP/1.1", req.Proto)
+	assert.Equal(t, "CONNECT", req.Method)
+	assert.Equal(t, &url.URL{Host: "domain.com:80"}, req.URL)
+	assert.Equal(t, "domain.com:80", req.Host)
+	assert.Equal(t, "domain.com:80", req.RequestURI)
 }
 
-type upstreamServerStub struct {
+type proxyServerStub struct {
 	listener net.Listener
 	conn     net.Conn
 
@@ -66,7 +56,7 @@ type upstreamServerStub struct {
 	mu          sync.Mutex
 }
 
-func (server *upstreamServerStub) run() {
+func (server *proxyServerStub) run() {
 	l, err := net.Listen("tcp", ":6969")
 	server.mu.Lock()
 	server.listener, server.lastError = l, err
@@ -97,7 +87,7 @@ func (server *upstreamServerStub) run() {
 	}()
 }
 
-func (server *upstreamServerStub) stop() {
+func (server *proxyServerStub) stop() {
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	if server.listener != nil {
@@ -108,13 +98,13 @@ func (server *upstreamServerStub) stop() {
 	}
 }
 
-func (server *upstreamServerStub) getLastError() error {
+func (server *proxyServerStub) getLastError() error {
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	return server.lastError
 }
 
-func (server *upstreamServerStub) getLastRequest() http.Request {
+func (server *proxyServerStub) getLastRequest() http.Request {
 	server.mu.Lock()
 	defer server.mu.Unlock()
 	return *server.lastRequest

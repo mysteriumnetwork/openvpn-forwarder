@@ -25,37 +25,37 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-
 	"strings"
 
-	"github.com/elazarl/goproxy"
 	"github.com/inconshreveable/go-vhost"
 	"github.com/mysteriumnetwork/openvpn-forwarder/proxy"
+	netproxy "golang.org/x/net/proxy"
 )
 
 var proxyHTTPAddr = flag.String("proxy.http-bind", ":8080", "HTTP proxy address for incoming connections")
 var proxyHTTPSAddr = flag.String("proxy.https-bind", ":8081", "HTTPS proxy address for incoming connections")
 var proxyUpstreamURL = flag.String("proxy.upstream-url", "http://superproxy.com:8080", "Upstream HTTPS proxy where to forward traffic")
-var filterDomains = flag.String("filter.domains", "", `Filter which domains to forward (separated by comma - "ipinfo.io,ipify.org")`)
+var filterHostnames = flag.String("filter.domains", "", `Filter which domains to forward (separated by comma - "ipinfo.io,ipify.org")`)
 
 func main() {
 	flag.Parse()
 
-	temp := goproxy.NewProxyHttpServer()
-	upstreamDialer := temp.NewConnectDialToProxy(*proxyUpstreamURL)
-	if upstreamDialer == nil {
+	dialerUpstreamURL, err := url.Parse(*proxyUpstreamURL)
+	if err != nil || dialerUpstreamURL.Scheme != "http" {
 		log.Fatalf("Invalid upstream URL: %s", *proxyUpstreamURL)
 	}
+	dialerUpstream := proxy.NewDialerHTTPConnect(proxy.DialerDirect, dialerUpstreamURL.Host)
 
-	var forwardConditions []goproxy.ReqCondition
-	if *filterDomains != "" {
-		proxyFilterDomainsArr := strings.Split(*filterDomains, ",")
-		if len(proxyFilterDomainsArr) > 0 {
-			forwardConditions = append(forwardConditions, goproxy.ReqHostIs(proxyFilterDomainsArr...))
+	var dialer netproxy.Dialer = dialerUpstream
+	if *filterHostnames != "" {
+		dialerCombined := netproxy.NewPerHost(proxy.DialerDirect, dialerUpstream)
+		for _, host := range strings.Split(*filterHostnames, ",") {
+			dialerCombined.AddHost(host)
 		}
+		dialer = dialerCombined
 	}
 
-	proxyServer := proxy.NewServer(upstreamDialer, forwardConditions...)
+	proxyServer := proxy.NewServer(dialer)
 	log.Print("Serving HTTP proxy on ", *proxyHTTPAddr)
 	go http.ListenAndServe(*proxyHTTPAddr, proxyServer)
 

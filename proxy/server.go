@@ -24,16 +24,16 @@ import (
 	"net/http"
 
 	"github.com/elazarl/goproxy"
+	netproxy "golang.org/x/net/proxy"
 )
 
 // Dialer is a means to establish a connection.
 type Dialer func(network, addr string) (net.Conn, error)
 
 // NewServer returns new instance of HTTP transparent proxy server
-func NewServer(upstreamDialer Dialer, forwardConditions ...goproxy.ReqCondition) *goproxy.ProxyHttpServer {
+func NewServer(upstreamDialer netproxy.Dialer) *goproxy.ProxyHttpServer {
 	server := goproxy.NewProxyHttpServer()
 	server.Verbose = true
-	server.ConnectDial = upstreamDialer
 	server.NonproxyHandler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Host == "" {
 			fmt.Fprintln(w, "Cannot handle requests without Host header, e.g., HTTP 1.0")
@@ -44,8 +44,13 @@ func NewServer(upstreamDialer Dialer, forwardConditions ...goproxy.ReqCondition)
 		server.ServeHTTP(w, req)
 	})
 
-	server.OnRequest(forwardConditions...).DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		conn, err := upstreamDialer("tcp", req.Host+":80")
+	server.ConnectDial = upstreamDialer.Dial
+	server.OnRequest().HandleConnectFunc(func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
+		return goproxy.OkConnect, host
+	})
+
+	server.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
+		conn, err := upstreamDialer.Dial("tcp", req.Host+":80")
 		if err != nil {
 			return req, nil
 		}
