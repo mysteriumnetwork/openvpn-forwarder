@@ -37,7 +37,9 @@ func Build() error {
 
 // Run the application
 func Run() error {
-	return sh.RunV(buildPath)
+	return sh.RunV(buildPath,
+		"--proxy.upstream-url=http://superproxy.com:8080",
+	)
 }
 
 // Runs the test suite against the repo

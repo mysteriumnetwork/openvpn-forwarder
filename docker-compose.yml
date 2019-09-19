@@ -7,11 +7,11 @@ services:
       dockerfile: Dockerfile
     command: >
       --proxy.http-bind=:8080
-      --proxy.https-bind=:8081
+      --proxy.https-bind=:8443
       --proxy.upstream-url=http://superproxy.com:8080
     cap_add:
     - NET_ADMIN
     - NET_RAW
     ports:
     - "8080:8080"
-    - "8081:8081"
+    - "8443:8443"

@@ -33,9 +33,9 @@ import (
 )
 
 var proxyHTTPAddr = flag.String("proxy.http-bind", ":8080", "HTTP proxy address for incoming connections")
-var proxyHTTPSAddr = flag.String("proxy.https-bind", ":8081", "HTTPS proxy address for incoming connections")
-var proxyUpstreamURL = flag.String("proxy.upstream-url", "http://superproxy.com:8080", "Upstream HTTPS proxy where to forward traffic")
-var filterHostnames = flag.String("filter.domains", "", `Filter which domains to forward (separated by comma - "ipinfo.io,ipify.org")`)
+var proxyHTTPSAddr = flag.String("proxy.https-bind", ":8443", "HTTPS proxy address for incoming connections")
+var proxyUpstreamURL = flag.String("proxy.upstream-url", "", `Upstream HTTPS proxy where to forward traffic (e.g. "http://superproxy.com:8080")`)
+var filterHostnames = flag.String("filter.hostnames", "", `Explicitly forward just several hostnames (separated by comma - "ipinfo.io,ipify.org")`)
 
 func main() {
 	flag.Parse()
