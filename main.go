@@ -34,9 +34,23 @@ import (
 
 var proxyHTTPAddr = flag.String("proxy.http-bind", ":8080", "HTTP proxy address for incoming connections")
 var proxyHTTPSAddr = flag.String("proxy.https-bind", ":8443", "HTTPS proxy address for incoming connections")
-var proxyUpstreamURL = flag.String("proxy.upstream-url", "", `Upstream HTTPS proxy where to forward traffic (e.g. "http://superproxy.com:8080")`)
-var filterHostnames = flag.String("filter.hostnames", "", `Explicitly forward just several hostnames (separated by comma - "ipinfo.io,ipify.org")`)
+var proxyUpstreamURL = flag.String(
+	"proxy.upstream-url",
+	"",
+	`Upstream HTTPS proxy where to forward traffic (e.g. "http://superproxy.com:8080")`,
+)
 
+var filterHostnames = FlagArray(
+	"filter.hostnames",
+	`Explicitly forward just several hostnames (separated by comma - "ipinfo.io,ipify.org")`,
+)
+var filterZones = FlagArray(
+	"filter.zones",
+	`Explicitly forward just several DNS zones. A zone of "example.com" matches "example.com" and all of its subdomains. (separated by comma - "ipinfo.io,ipify.org",)`,
+)
+
+// DNS suffix that will use the bypass proxy. A zone of
+// //
 func main() {
 	flag.Parse()
 
@@ -47,12 +61,15 @@ func main() {
 	dialerUpstream := proxy.NewDialerHTTPConnect(proxy.DialerDirect, dialerUpstreamURL.Host)
 
 	var dialer netproxy.Dialer = dialerUpstream
-	if *filterHostnames != "" {
-		dialerCombined := netproxy.NewPerHost(proxy.DialerDirect, dialerUpstream)
-		for _, host := range strings.Split(*filterHostnames, ",") {
-			dialerCombined.AddHost(host)
+	if len(*filterHostnames) > 0 || len(*filterZones) > 0 {
+		dialerPerHost := netproxy.NewPerHost(proxy.DialerDirect, dialerUpstream)
+		for _, host := range *filterHostnames {
+			dialerPerHost.AddHost(host)
 		}
-		dialer = dialerCombined
+		for _, host := range *filterZones {
+			dialerPerHost.AddZone(host)
+		}
+		dialer = dialerPerHost
 	}
 
 	proxyServer := proxy.NewServer(dialer)
@@ -92,6 +109,26 @@ func main() {
 			proxyServer.ServeHTTP(resp, connectReq)
 		}(c)
 	}
+}
+
+// FlagArray defines a string array flag
+func FlagArray(name string, usage string) *flagArray {
+	p := &flagArray{}
+	flag.Var(p, name, usage)
+	return p
+}
+
+type flagArray []string
+
+func (flag *flagArray) String() string {
+	return strings.Join(*flag, ",")
+}
+
+func (flag *flagArray) Set(s string) error {
+	*flag = strings.FieldsFunc(s, func(c rune) bool {
+		return c == ','
+	})
+	return nil
 }
 
 type dumbResponseWriter struct {
