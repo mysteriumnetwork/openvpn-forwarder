@@ -18,20 +18,22 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"flag"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/inconshreveable/go-vhost"
+	"github.com/mysteriumnetwork/openvpn-forwarder/api"
 	"github.com/mysteriumnetwork/openvpn-forwarder/proxy"
 	netproxy "golang.org/x/net/proxy"
 )
 
+var proxyAPIAddr = flag.String("proxy.api-bind", ":8000", "HTTP proxy API address")
 var proxyHTTPAddr = flag.String("proxy.http-bind", ":8080", "HTTP proxy address for incoming connections")
 var proxyHTTPSAddr = flag.String("proxy.https-bind", ":8443", "HTTPS proxy address for incoming connections")
 var proxyUpstreamURL = flag.String(
@@ -39,6 +41,8 @@ var proxyUpstreamURL = flag.String(
 	"",
 	`Upstream HTTPS proxy where to forward traffic (e.g. "http://superproxy.com:8080")`,
 )
+
+var stickyStorage = flag.String("stickiness-db-path", proxy.MemoryStorage, "Path to the database for stickiness mapping")
 
 var filterHostnames = FlagArray(
 	"filter.hostnames",
@@ -49,8 +53,6 @@ var filterZones = FlagArray(
 	`Explicitly forward just several DNS zones. A zone of "example.com" matches "example.com" and all of its subdomains. (separated by comma - "ipinfo.io,ipify.org",)`,
 )
 
-// DNS suffix that will use the bypass proxy. A zone of
-// //
 func main() {
 	flag.Parse()
 
@@ -58,6 +60,15 @@ func main() {
 	if err != nil || dialerUpstreamURL.Scheme != "http" {
 		log.Fatalf("Invalid upstream URL: %s", *proxyUpstreamURL)
 	}
+
+	sm, err := proxy.NewStickyMapper(*stickyStorage)
+	if err != nil {
+		log.Fatalf("Failed to create sticky mapper, %v", err)
+	}
+
+	api := api.NewServer(*proxyAPIAddr, sm.Save)
+	go api.Run()
+
 	dialerUpstream := proxy.NewDialerHTTPConnect(proxy.DialerDirect, dialerUpstreamURL.Host)
 
 	var dialer netproxy.Dialer = dialerUpstream
@@ -72,7 +83,7 @@ func main() {
 		dialer = dialerPerHost
 	}
 
-	proxyServer := proxy.NewServer(dialer)
+	proxyServer := proxy.NewServer(dialer, sm.Hash)
 	log.Print("Serving HTTP proxy on ", *proxyHTTPAddr)
 	go http.ListenAndServe(*proxyHTTPAddr, proxyServer)
 
@@ -91,24 +102,54 @@ func main() {
 			tlsConn, err := vhost.TLS(c)
 			if err != nil {
 				log.Printf("Error accepting new connection - %v", err)
+				return
 			}
+			defer tlsConn.Close()
+
 			if tlsConn.Host() == "" {
 				log.Printf("Cannot support non-SNI enabled clients")
 				return
 			}
-			connectReq := &http.Request{
-				Method: "CONNECT",
-				URL: &url.URL{
-					Opaque: tlsConn.Host(),
-					Host:   net.JoinHostPort(tlsConn.Host(), "443"),
-				},
-				Host:   tlsConn.Host(),
-				Header: make(http.Header),
+
+			remoteHost := net.JoinHostPort(tlsConn.Host(), "443")
+			conn, err := dialer.Dial("tcp", remoteHost)
+			if err != nil {
+				log.Printf("Error establishing connection to %s: %v", remoteHost, err)
+				return
 			}
-			resp := dumbResponseWriter{tlsConn}
-			proxyServer.ServeHTTP(resp, connectReq)
+			defer conn.Close()
+
+			if proxyConnection, ok := conn.(*proxy.Connection); ok {
+				clientHost, _, err := net.SplitHostPort(c.RemoteAddr().String())
+				if err != nil {
+					log.Printf("Failed to get host from address %s: %v", c.RemoteAddr(), err)
+					return
+				}
+				if err := proxyConnection.ConnectTo(conn, remoteHost, sm.Hash(clientHost)); err != nil {
+					log.Printf("Error establishing CONNECT tunnel to %s: %v", remoteHost, err)
+					return
+				}
+			}
+
+			copyAndWait(conn, tlsConn)
 		}(c)
 	}
+}
+
+func copyAndWait(src, dst io.ReadWriter) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		io.Copy(dst, src)
+		wg.Done()
+	}()
+	go func() {
+		io.Copy(src, dst)
+		wg.Done()
+	}()
+
+	wg.Wait()
 }
 
 // FlagArray defines a string array flag
@@ -129,27 +170,4 @@ func (flag *flagArray) Set(s string) error {
 		return c == ','
 	})
 	return nil
-}
-
-type dumbResponseWriter struct {
-	net.Conn
-}
-
-func (dumb dumbResponseWriter) Header() http.Header {
-	panic("Header() should not be called on this ResponseWriter")
-}
-
-func (dumb dumbResponseWriter) Write(buf []byte) (int, error) {
-	if bytes.Equal(buf, []byte("HTTP/1.0 200 OK\r\n\r\n")) {
-		return len(buf), nil // throw away the HTTP OK response from the faux CONNECT request
-	}
-	return dumb.Conn.Write(buf)
-}
-
-func (dumb dumbResponseWriter) WriteHeader(code int) {
-	panic("WriteHeader() should not be called on this ResponseWriter")
-}
-
-func (dumb dumbResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return dumb, bufio.NewReadWriter(bufio.NewReader(dumb), bufio.NewWriter(dumb)), nil
 }

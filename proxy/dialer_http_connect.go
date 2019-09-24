@@ -41,28 +41,27 @@ type dialerHTTPConnect struct {
 	forwardAddress string
 }
 
-// Dial makes actual connection to specified address through intermediate HTTP proxy
-func (dialer *dialerHTTPConnect) Dial(network, address string) (conn net.Conn, err error) {
-	conn, err = dialer.forwardDialer.Dial(network, dialer.forwardAddress)
-	if err != nil {
-		return nil, err
-	}
-
-	err = dialer.connectTo(conn, address)
-	if err != nil {
-		conn.Close()
-		return nil, err
-	}
-
-	return conn, nil
+type Connection struct {
+	net.Conn
 }
 
-func (dialer *dialerHTTPConnect) connectTo(conn net.Conn, address string) error {
+// Dial makes actual connection to specified address through intermediate HTTP proxy
+func (dialer *dialerHTTPConnect) Dial(network, address string) (net.Conn, error) {
+	conn, err := dialer.forwardDialer.Dial(network, dialer.forwardAddress)
+	return &Connection{conn}, err
+}
+
+func (c *Connection) ConnectTo(conn net.Conn, address string, userID string) error {
 	req := &http.Request{
 		Method: "CONNECT",
 		URL:    &url.URL{Host: address},
 		Host:   address,
 	}
+	if len(userID) > 0 {
+		req.Header = make(http.Header)
+		req.Header.Add("UserID", userID)
+	}
+
 	if err := req.Write(conn); err != nil {
 		return fmt.Errorf("failed to write the HTTP request: %s", err)
 	}
