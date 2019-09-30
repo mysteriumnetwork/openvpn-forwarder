@@ -56,17 +56,44 @@ FORWARDER_IP=`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress
 
 3. Redirect HTTP ports to forwarder (from Docker container):
 ```bash
-docker exec -it colibri iptables -A PREROUTING -p tcp -m tcp --dport 80 -j DNAT --to-destination $FORWARDER_IP:8080
-docker exec -it colibri iptables -A PREROUTING -p tcp -m tcp --dport 443 -j DNAT --to-destination $FORWARDER_IP:8443
+docker exec -it openvpn iptables -t nat -A PREROUTING -p tcp -m tcp --dport 80 -j DNAT --to-destination $FORWARDER_IP:8080
+docker exec -it openvpn iptables -t nat -A PREROUTING -p tcp -m tcp --dport 443 -j DNAT --to-destination $FORWARDER_IP:8443
 ```
 
-3. Forwarder redirects HTTP traffic to upstream HTTPS proxy (this case just 2 hostnames):
+4. Forwarder redirects HTTP traffic to upstream HTTPS proxy (this case just 2 hostnames):
 ```bash
 sudo openvpn --config client.ovpn
 curl "http://ipinfo.io/"
 curl "https://ipinfo.io/"
 ```
 
+
+
+## Debugging of traffic
+1. Check your server's current IP
+```bash
+curl "http://ipinfo.io/"
+```
+
+2. Check if your upstream HTTPS proxy is accepting requests
+```bash
+curl --proxytunnel --proxy superproxy.com:8080 "http://ipinfo.io/"
+```
+You are supposed to see your server's IP changed
+
+3. Check if forwarder is redirecting requests to upstream HTTPS proxy
+```bash
+FORWARDER_IP=`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' forwarder`
+curl --proxytunnel --proxy $FORWARDER_IP:8080 "http://ipinfo.io"
+```
+You should see different current IP of your server
+
+4. Check if traffic of Openvpn's container is being forwarded
+```bash
+docker exec -it openvpn curl "https://ipinfo.io/"
+OR
+docker exec -it openvpn wget -q -O - "https://ipinfo.io/"
+```
 
 
 ## License
