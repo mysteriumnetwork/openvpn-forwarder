@@ -86,7 +86,7 @@ if [[ "$1" == "add" || "$1" == "update" ]]; then
 fi
 ```
 
-This will update `forwarder` IP to UserID mapping on every user connection
+This will update `forwarder` virtual IP to UserID mapping on every user connection
 
 To be able to get user original address for mapping we need to disable `MASQUERADE` to the `forwarder` container:
 

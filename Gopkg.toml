@@ -40,3 +40,15 @@
 [[constraint]]
   branch = "master"
   name = "golang.org/x/net"
+
+[[constraint]]
+  name = "github.com/cihub/seelog"
+  version = "2.6.0"
+
+[[constraint]]
+  version = "1.4.0"
+  name = "github.com/gin-gonic/gin"
+
+[[constraint]]
+  name = "github.com/tidwall/buntdb"
+  version = "1.1.0"
