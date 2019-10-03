@@ -41,6 +41,7 @@ type dialerHTTPConnect struct {
 	forwardAddress string
 }
 
+// Connection wraps net.Conn to provide extra method for establishing CONNECT session.
 type Connection struct {
 	net.Conn
 }
@@ -51,6 +52,8 @@ func (dialer *dialerHTTPConnect) Dial(network, address string) (net.Conn, error)
 	return &Connection{conn}, err
 }
 
+// ConnectTo establishes new CONNECT session within existing connection.
+// It allows to pass UserID to enable sticky sessions.
 func (c *Connection) ConnectTo(conn net.Conn, address string, userID string) error {
 	req := &http.Request{
 		Method: "CONNECT",

@@ -107,7 +107,7 @@ func main() {
 			defer tlsConn.Close()
 
 			if tlsConn.Host() == "" {
-				log.Printf("Cannot support non-SNI enabled clients")
+				log.Printf("Cannot support non-SNI enabled TLS sessions")
 				return
 			}
 

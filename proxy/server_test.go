@@ -42,7 +42,7 @@ func Test_Server_ServeHTTP(t *testing.T) {
 	req, _ := http.NewRequest("GET", "http://domain.com", nil)
 	resp := httptest.NewRecorder()
 
-	proxyServer := NewServer(upstreamDialer)
+	proxyServer := NewServer(upstreamDialer, func(_ string) string { return "" })
 	proxyServer.ServeHTTP(resp, req)
 
 	t.Log(resp.Code)

@@ -38,6 +38,9 @@ func Test_dialerHTTPConnect_DialCreatesValidRequest(t *testing.T) {
 	assert.NotNil(t, conn)
 	assert.NoError(t, err)
 
+	err = conn.(*Connection).ConnectTo(conn, "domain.com:80", "")
+	assert.NoError(t, err)
+
 	req := server.getLastRequest()
 	assert.NoError(t, server.getLastError())
 	assert.Equal(t, "HTTP/1.1", req.Proto)
