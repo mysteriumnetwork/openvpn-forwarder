@@ -18,8 +18,8 @@
 package api
 
 import (
-	"context"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,8 +29,12 @@ type mapping struct {
 	UserID string `json:"userId"`
 }
 
+type stickySaver interface {
+	Save(ip string, userID string)
+}
+
 // NewServer returns new instance of API server
-func NewServer(addr string, storage func(ip, userID string)) *Server {
+func NewServer(addr string, storage stickySaver) *http.Server {
 	gin.SetMode(gin.ReleaseMode)
 	ginEngine := gin.Default()
 
@@ -39,35 +43,15 @@ func NewServer(addr string, storage func(ip, userID string)) *Server {
 		v1.POST("/map", func(c *gin.Context) {
 			var m mapping
 			c.BindJSON(&m)
-			storage(m.IP, m.UserID)
+			storage.Save(m.IP, m.UserID)
 		})
 	}
 
-	return &Server{
-		Addr: addr,
+	return &http.Server{
+		Handler: ginEngine,
+		Addr:    addr,
 
-		ginEngine: ginEngine,
-		httpServer: &http.Server{
-			Handler: ginEngine,
-			Addr:    addr,
-		},
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
 	}
-}
-
-// Server defines API server with all HTTP endpoints attached to it
-type Server struct {
-	Addr string
-
-	ginEngine  *gin.Engine
-	httpServer *http.Server
-}
-
-// Run starts API server
-func (server *Server) Run() error {
-	return http.ListenAndServe(server.Addr, server.ginEngine)
-}
-
-// Stop shutdowns API server
-func (server *Server) Stop(ctx context.Context) error {
-	return server.httpServer.Shutdown(ctx)
 }

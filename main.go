@@ -22,10 +22,8 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 
 	"github.com/inconshreveable/go-vhost"
 	"github.com/mysteriumnetwork/openvpn-forwarder/api"
@@ -42,7 +40,7 @@ var proxyUpstreamURL = flag.String(
 	`Upstream HTTPS proxy where to forward traffic (e.g. "http://superproxy.com:8080")`,
 )
 
-var stickyStorage = flag.String("stickiness-db-path", proxy.MemoryStorage, "Path to the database for stickiness mapping")
+var stickyStoragePath = flag.String("stickiness-db-path", proxy.MemoryStorage, "Path to the database for stickiness mapping")
 
 var filterHostnames = FlagArray(
 	"filter.hostnames",
@@ -53,6 +51,11 @@ var filterZones = FlagArray(
 	`Explicitly forward just several DNS zones. A zone of "example.com" matches "example.com" and all of its subdomains. (separated by comma - "ipinfo.io,ipify.org",)`,
 )
 
+type stickyMapper interface {
+	Save(ip string, userID string)
+	Hash(ip string) string
+}
+
 func main() {
 	flag.Parse()
 
@@ -61,13 +64,13 @@ func main() {
 		log.Fatalf("Invalid upstream URL: %s", *proxyUpstreamURL)
 	}
 
-	sm, err := proxy.NewStickyMapper(*stickyStorage)
+	sm, err := proxy.NewStickyMapper(*stickyStoragePath)
 	if err != nil {
 		log.Fatalf("Failed to create sticky mapper, %v", err)
 	}
 
-	api := api.NewServer(*proxyAPIAddr, sm.Save)
-	go api.Run()
+	api := api.NewServer(*proxyAPIAddr, sm)
+	go api.ListenAndServe()
 
 	dialerUpstream := proxy.NewDialerHTTPConnect(proxy.DialerDirect, dialerUpstreamURL.Host)
 
@@ -83,9 +86,9 @@ func main() {
 		dialer = dialerPerHost
 	}
 
-	proxyServer := proxy.NewServer(dialer, sm.Hash)
+	proxyServer := proxy.NewServer(*proxyHTTPAddr, dialer, sm)
 	log.Print("Serving HTTP proxy on ", *proxyHTTPAddr)
-	go http.ListenAndServe(*proxyHTTPAddr, proxyServer)
+	go proxyServer.ListenAndServe()
 
 	log.Print("Serving HTTPS proxyServer on ", *proxyHTTPSAddr)
 	ln, err := net.Listen("tcp", *proxyHTTPSAddr)
@@ -98,58 +101,45 @@ func main() {
 			log.Printf("Error accepting new connection - %v", err)
 			continue
 		}
-		go func(c net.Conn) {
-			tlsConn, err := vhost.TLS(c)
-			if err != nil {
-				log.Printf("Error accepting new connection - %v", err)
-				return
-			}
-			defer tlsConn.Close()
-
-			if tlsConn.Host() == "" {
-				log.Printf("Cannot support non-SNI enabled TLS sessions")
-				return
-			}
-
-			remoteHost := net.JoinHostPort(tlsConn.Host(), "443")
-			conn, err := dialer.Dial("tcp", remoteHost)
-			if err != nil {
-				log.Printf("Error establishing connection to %s: %v", remoteHost, err)
-				return
-			}
-			defer conn.Close()
-
-			if proxyConnection, ok := conn.(*proxy.Connection); ok {
-				clientHost, _, err := net.SplitHostPort(c.RemoteAddr().String())
-				if err != nil {
-					log.Printf("Failed to get host from address %s: %v", c.RemoteAddr(), err)
-					return
-				}
-				if err := proxyConnection.ConnectTo(conn, remoteHost, sm.Hash(clientHost)); err != nil {
-					log.Printf("Error establishing CONNECT tunnel to %s: %v", remoteHost, err)
-					return
-				}
-			}
-
-			copyAndWait(conn, tlsConn)
-		}(c)
+		go serveTLS(c, dialer, sm)
 	}
 }
 
-func copyAndWait(src, dst io.ReadWriter) {
-	var wg sync.WaitGroup
-	wg.Add(2)
+func serveTLS(c net.Conn, dialer netproxy.Dialer, sm stickyMapper) {
+	tlsConn, err := vhost.TLS(c)
+	if err != nil {
+		log.Printf("Error accepting new connection - %v", err)
+		return
+	}
+	defer tlsConn.Close()
 
-	go func() {
-		io.Copy(dst, src)
-		wg.Done()
-	}()
-	go func() {
-		io.Copy(src, dst)
-		wg.Done()
-	}()
+	if tlsConn.Host() == "" {
+		log.Printf("Cannot support non-SNI enabled TLS sessions")
+		return
+	}
 
-	wg.Wait()
+	remoteHost := net.JoinHostPort(tlsConn.Host(), "443")
+	conn, err := dialer.Dial("tcp", remoteHost)
+	if err != nil {
+		log.Printf("Error establishing connection to %s: %v", remoteHost, err)
+		return
+	}
+	defer conn.Close()
+
+	if proxyConnection, ok := conn.(*proxy.Connection); ok {
+		clientHost, _, err := net.SplitHostPort(c.RemoteAddr().String())
+		if err != nil {
+			log.Printf("Failed to get host from address %s: %v", c.RemoteAddr(), err)
+			return
+		}
+		if err := proxyConnection.ConnectTo(conn, remoteHost, sm.Hash(clientHost)); err != nil {
+			log.Printf("Error establishing CONNECT tunnel to %s: %v", remoteHost, err)
+			return
+		}
+	}
+
+	go io.Copy(conn, tlsConn)
+	io.Copy(tlsConn, conn)
 }
 
 // FlagArray defines a string array flag
