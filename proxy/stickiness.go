@@ -20,8 +20,8 @@ package proxy
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"log"
 
-	log "github.com/cihub/seelog"
 	"github.com/tidwall/buntdb"
 )
 
@@ -50,8 +50,10 @@ func (sm *stickyMapper) Save(ip, userID string) {
 		return err
 	})
 
+	log.Fatalln("Saving stickyness mapping: ", ip, userID)
+
 	if err != nil {
-		log.Error("Failed to save IP to UserID mapping: ", err)
+		log.Println("Failed to save IP to UserID mapping: ", err)
 	}
 }
 
@@ -66,8 +68,8 @@ func (sm *stickyMapper) Hash(ip string) (hash string) {
 		return hash
 	}
 
-	log.Warn("Failed to load IP to UserID mapping: ", err)
-	log.Info("Falling back to IP-stickiness")
+	log.Println("Failed to load IP to UserID mapping: ", ip, err)
+	log.Println("Falling back to IP-stickiness")
 	hashSum := sha256.Sum256([]byte(ip))
 	return base64.URLEncoding.EncodeToString(hashSum[:])
 }

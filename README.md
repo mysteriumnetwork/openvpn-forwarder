@@ -89,7 +89,7 @@ fi
 
 This will send an update to `forwarder` with virtual IP to UserHash mapping on every user connection.
 
-To be able to get user's original address for mapping we need to disable `MASQUERADE` to the `forwarder` container:
+To be able to get user's virtual IP for mapping we need to disable `MASQUERADE` to the `forwarder` container:
 
 Execute the following command on the `openvpn` container:
 ```
@@ -101,7 +101,7 @@ And the following route needs to be added to the `forwarder` container:
 docker exec -it forwarder route add -net 192.168.255.0/24 gw openvpn
 ```
 
-* `192.168.255.0/24` - is a OpenVPN subnet that will be used for clients;
+* `192.168.255.0/24` - is a OpenVPN subnet that will be used for virtual IPs of clients;
 * `forwarder` - is a container name of the OpenVPN-forwarder, this name should resolve from any container in the `openvpn_network` docker network.
 * `openvpn` - is a container name of the OpenVPN server, this name should resolve from any container in the `openvpn_network` docker network.
 
