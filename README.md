@@ -67,6 +67,43 @@ curl "http://ipinfo.io/"
 curl "https://ipinfo.io/"
 ```
 
+## User session stickiness
+
+To enable user stickiness the following configuration is required from the OpenVPN server:
+
+Add the following line to the `/etc/openvpn/openvpn.conf` file:
+
+```
+learn-address /etc/openvpn/hook.sh
+```
+
+And create the file `/etc/openvpn/hook.sh` file:
+
+```
+#!/bin/bash
+if [[ "$1" == "add" || "$1" == "update" ]]; then
+	userHash=$(echo $3 | sha256sum | cut -d' ' -f1)
+	curl -i -X POST http://forwarder:8000/api/v1/map -H "Accept: application/json" -H "Content-Type: application/json" -d "{\"ip\":\"$2\",\"userId\":\"$userHash\"}"
+fi
+```
+
+This will send an update to `forwarder` with virtual IP to UserHash mapping on every user connection.
+
+To be able to get user's virtual IP for mapping we need to disable `MASQUERADE` to the `forwarder` container:
+
+Execute the following command on the `openvpn` container:
+```
+docker exec -it openvpn iptables -t nat -A POSTROUTING ! -d forwarder -j MASQUERADE
+```
+
+And the following route needs to be added to the `forwarder` container:
+```
+docker exec -it forwarder route add -net 192.168.255.0/24 gw openvpn
+```
+
+* `192.168.255.0/24` - is a OpenVPN subnet that will be used for virtual IPs of clients;
+* `forwarder` - is a container name of the OpenVPN-forwarder, this name should resolve from any container in the `openvpn_network` docker network.
+* `openvpn` - is a container name of the OpenVPN server, this name should resolve from any container in the `openvpn_network` docker network.
 
 
 ## Debugging of traffic

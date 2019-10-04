@@ -42,8 +42,8 @@ func Test_Server_ServeHTTP(t *testing.T) {
 	req, _ := http.NewRequest("GET", "http://domain.com", nil)
 	resp := httptest.NewRecorder()
 
-	proxyServer := NewServer(upstreamDialer)
-	proxyServer.ServeHTTP(resp, req)
+	proxyServer := NewServer("", upstreamDialer, &stickyMapperStub{})
+	proxyServer.Handler.ServeHTTP(resp, req)
 
 	t.Log(resp.Code)
 	t.Log(resp.Body.String())
@@ -55,6 +55,12 @@ func Test_Server_ServeHTTP(t *testing.T) {
 	assert.Equal(t, &url.URL{Host: "domain.com:80"}, upstreamReq.URL)
 	assert.Equal(t, "domain.com:80", upstreamReq.Host)
 	assert.Equal(t, "domain.com:80", upstreamReq.RequestURI)
+}
+
+type stickyMapperStub struct{}
+
+func (sms *stickyMapperStub) Hash(ip string) string {
+	return "stubhash"
 }
 
 type upstreamServerStub struct {

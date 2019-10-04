@@ -27,11 +27,12 @@ import (
 	netproxy "golang.org/x/net/proxy"
 )
 
-// Dialer is a means to establish a connection.
-type Dialer func(network, addr string) (net.Conn, error)
+type stickyHasher interface {
+	Hash(ip string) string
+}
 
 // NewServer returns new instance of HTTP transparent proxy server
-func NewServer(upstreamDialer netproxy.Dialer) *goproxy.ProxyHttpServer {
+func NewServer(addr string, upstreamDialer netproxy.Dialer, mapper stickyHasher) *http.Server {
 	server := goproxy.NewProxyHttpServer()
 	server.Verbose = true
 	server.NonproxyHandler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -55,6 +56,13 @@ func NewServer(upstreamDialer netproxy.Dialer) *goproxy.ProxyHttpServer {
 			return req, nil
 		}
 
+		if proxyConnection, ok := conn.(*Connection); ok {
+			clientHost, _, _ := net.SplitHostPort(req.RemoteAddr)
+			if err := proxyConnection.ConnectTo(conn, req.Host+":80", mapper.Hash(clientHost)); err != nil {
+				return req, nil
+			}
+		}
+
 		err = req.Write(conn)
 		if err != nil {
 			return req, nil
@@ -68,5 +76,8 @@ func NewServer(upstreamDialer netproxy.Dialer) *goproxy.ProxyHttpServer {
 		return req, resp
 	})
 
-	return server
+	return &http.Server{
+		Addr:    addr,
+		Handler: server,
+	}
 }
