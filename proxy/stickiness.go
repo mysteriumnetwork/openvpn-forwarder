@@ -44,14 +44,13 @@ func NewStickyMapper(path string) (*stickyMapper, error) {
 
 // Save creates or updated IP to UserID mapping.
 func (sm *stickyMapper) Save(ip, userID string) {
+	log.Printf("Adding stickiness: %s -> %s", ip, userID)
+
 	hashSum := sha256.Sum256([]byte(userID))
 	err := sm.cache.Update(func(tx *buntdb.Tx) error {
 		_, _, err := tx.Set(ip, base64.URLEncoding.EncodeToString(hashSum[:]), nil)
 		return err
 	})
-
-	log.Fatalln("Saving stickyness mapping: ", ip, userID)
-
 	if err != nil {
 		log.Println("Failed to save IP to UserID mapping: ", err)
 	}
@@ -63,7 +62,6 @@ func (sm *stickyMapper) Hash(ip string) (hash string) {
 		hash, err = tx.Get(ip)
 		return err
 	})
-
 	if err == nil {
 		return hash
 	}

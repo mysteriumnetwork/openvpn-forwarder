@@ -48,7 +48,7 @@ var filterHostnames = FlagArray(
 )
 var filterZones = FlagArray(
 	"filter.zones",
-	`Explicitly forward just several DNS zones. A zone of "example.com" matches "example.com" and all of its subdomains. (separated by comma - "ipinfo.io,ipify.org",)`,
+	`Explicitly forward just several DNS zones. A zone of "example.com" matches "example.com" and all of its subdomains. (separated by comma - "ipinfo.io,ipify.org")`,
 )
 
 type stickyMapper interface {
@@ -69,28 +69,33 @@ func main() {
 		log.Fatalf("Failed to create sticky mapper, %v", err)
 	}
 
-	api := api.NewServer(*proxyAPIAddr, sm)
-	go api.ListenAndServe()
+	apiServer := api.NewServer(*proxyAPIAddr, sm)
+	go apiServer.ListenAndServe()
 
 	dialerUpstream := proxy.NewDialerHTTPConnect(proxy.DialerDirect, dialerUpstreamURL.Host)
 
-	var dialer netproxy.Dialer = dialerUpstream
+	var dialer netproxy.Dialer
 	if len(*filterHostnames) > 0 || len(*filterZones) > 0 {
 		dialerPerHost := netproxy.NewPerHost(proxy.DialerDirect, dialerUpstream)
 		for _, host := range *filterHostnames {
+			log.Printf("Redirecting: %s -> %s", host, dialerUpstreamURL)
 			dialerPerHost.AddHost(host)
 		}
-		for _, host := range *filterZones {
-			dialerPerHost.AddZone(host)
+		for _, zone := range *filterZones {
+			log.Printf("Redirecting: *.%s -> %s", zone, dialerUpstreamURL)
+			dialerPerHost.AddZone(zone)
 		}
 		dialer = dialerPerHost
+	} else {
+		dialer = dialerUpstream
+		log.Printf("Redirecting: * -> %s", dialerUpstreamURL)
 	}
 
 	proxyServer := proxy.NewServer(*proxyHTTPAddr, dialer, sm)
 	log.Print("Serving HTTP proxy on ", *proxyHTTPAddr)
 	go proxyServer.ListenAndServe()
 
-	log.Print("Serving HTTPS proxyServer on ", *proxyHTTPSAddr)
+	log.Print("Serving HTTPS proxy on ", *proxyHTTPSAddr)
 	ln, err := net.Listen("tcp", *proxyHTTPSAddr)
 	if err != nil {
 		log.Fatalf("Error listening for https connections - %v", err)
