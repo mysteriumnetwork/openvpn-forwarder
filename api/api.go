@@ -33,8 +33,12 @@ type stickySaver interface {
 	Save(ip string, userID string)
 }
 
+type domainTracker interface {
+	Dump() map[string]uint64
+}
+
 // NewServer returns new instance of API server
-func NewServer(addr string, storage stickySaver) *http.Server {
+func NewServer(addr string, storage stickySaver, dt domainTracker) *http.Server {
 	gin.SetMode(gin.ReleaseMode)
 	ginEngine := gin.Default()
 
@@ -44,6 +48,9 @@ func NewServer(addr string, storage stickySaver) *http.Server {
 			var m mapping
 			c.BindJSON(&m)
 			storage.Save(m.IP, m.UserID)
+		})
+		v1.GET("/domains", func(c *gin.Context) {
+			c.JSON(http.StatusOK, dt.Dump())
 		})
 	}
 
