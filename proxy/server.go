@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 
 	"github.com/elazarl/goproxy"
 	netproxy "golang.org/x/net/proxy"
@@ -31,8 +32,12 @@ type stickyHasher interface {
 	Hash(ip string) string
 }
 
+type domainTracker interface {
+	Inc(domain string)
+}
+
 // NewServer returns new instance of HTTP transparent proxy server
-func NewServer(addr string, upstreamDialer netproxy.Dialer, mapper stickyHasher) *http.Server {
+func NewServer(addr string, upstreamDialer netproxy.Dialer, mapper stickyHasher, dt domainTracker) *http.Server {
 	server := goproxy.NewProxyHttpServer()
 	server.Verbose = true
 	server.NonproxyHandler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -55,6 +60,9 @@ func NewServer(addr string, upstreamDialer netproxy.Dialer, mapper stickyHasher)
 		if err != nil {
 			return req, nil
 		}
+
+		domain := strings.Split(req.Host, ":")
+		dt.Inc(domain[0])
 
 		if proxyConnection, ok := conn.(*Connection); ok {
 			clientHost, _, _ := net.SplitHostPort(req.RemoteAddr)

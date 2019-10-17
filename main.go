@@ -51,9 +51,16 @@ var filterZones = FlagArray(
 	`Explicitly forward just several DNS zones. A zone of "example.com" matches "example.com" and all of its subdomains. (separated by comma - "ipinfo.io,ipify.org")`,
 )
 
+var enableDomainTracer = flag.Bool("enable-domain-tracer", false, "Enable tracing domain names from requests")
+
 type stickyMapper interface {
 	Save(ip string, userID string)
 	Hash(ip string) string
+}
+
+type domainTracker interface {
+	Inc(domain string)
+	Dump() map[string]uint64
 }
 
 func main() {
@@ -69,7 +76,12 @@ func main() {
 		log.Fatalf("Failed to create sticky mapper, %v", err)
 	}
 
-	apiServer := api.NewServer(*proxyAPIAddr, sm)
+	var domainTracer domainTracker = proxy.NewNoopTracer()
+	if *enableDomainTracer {
+		domainTracer = proxy.NewDomainTracer()
+	}
+
+	apiServer := api.NewServer(*proxyAPIAddr, sm, domainTracer)
 	go apiServer.ListenAndServe()
 
 	dialerUpstream := proxy.NewDialerHTTPConnect(proxy.DialerDirect, dialerUpstreamURL.Host)
@@ -91,7 +103,7 @@ func main() {
 		log.Printf("Redirecting: * -> %s", dialerUpstreamURL)
 	}
 
-	proxyServer := proxy.NewServer(*proxyHTTPAddr, dialer, sm)
+	proxyServer := proxy.NewServer(*proxyHTTPAddr, dialer, sm, domainTracer)
 	log.Print("Serving HTTP proxy on ", *proxyHTTPAddr)
 	go proxyServer.ListenAndServe()
 
@@ -106,11 +118,11 @@ func main() {
 			log.Printf("Error accepting new connection - %v", err)
 			continue
 		}
-		go serveTLS(c, dialer, sm)
+		go serveTLS(c, dialer, sm, domainTracer)
 	}
 }
 
-func serveTLS(c net.Conn, dialer netproxy.Dialer, sm stickyMapper) {
+func serveTLS(c net.Conn, dialer netproxy.Dialer, sm stickyMapper, dt domainTracker) {
 	tlsConn, err := vhost.TLS(c)
 	if err != nil {
 		log.Printf("Error accepting new connection - %v", err)
@@ -130,6 +142,9 @@ func serveTLS(c net.Conn, dialer netproxy.Dialer, sm stickyMapper) {
 		return
 	}
 	defer conn.Close()
+
+	domain := strings.Split(remoteHost, ":")
+	dt.Inc(domain[0])
 
 	if proxyConnection, ok := conn.(*proxy.Connection); ok {
 		clientHost, _, err := net.SplitHostPort(c.RemoteAddr().String())
