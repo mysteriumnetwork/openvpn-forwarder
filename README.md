@@ -16,7 +16,7 @@ Lets assume:
 
 1. Run forwarder as Docker container:
 ```bash
-docker run -d --name forwarder -p 127.0.0.1:8080:8080 -p 127.0.0.1:8443:8443 mysteriumnetwork/openvpn-forwarder \
+docker run -d --name forwarder -p 127.0.0.1:8080:8080 -p 127.0.0.1:8443:8443 --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
     --proxy.upstream-url="http://superproxy.com:8080" \
     --filter.hostnames="ipinfo.io"
 ```
@@ -44,7 +44,7 @@ Lets assume:
 
 1. Run forwarder as Docker container:
 ```bash
-docker run -d --name forwarder --net openvpn_network mysteriumnetwork/openvpn-forwarder \
+docker run -d --name forwarder --net openvpn_network --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
     --proxy.upstream-url="http://superproxy.com:8080" \
     --filter.hostnames="ipinfo.io,whatismyipaddress.com"
 ```
@@ -74,16 +74,24 @@ To enable user stickiness the following configuration is required from the OpenV
 Add the following line to the `/etc/openvpn/openvpn.conf` file:
 
 ```
-learn-address /etc/openvpn/hook.sh
+learn-address /etc/openvpn/stick-user.sh
 ```
 
-And create the file `/etc/openvpn/hook.sh` file:
+And create the file `/etc/openvpn/stick-user.sh` file:
 
 ```
 #!/bin/bash
 if [[ "$1" == "add" || "$1" == "update" ]]; then
 	userHash=$(echo $3 | sha256sum | cut -d' ' -f1)
 	curl -i -X POST http://forwarder:8000/api/v1/map -H "Accept: application/json" -H "Content-Type: application/json" -d "{\"ip\":\"$2\",\"userId\":\"$userHash\"}"
+fi
+```
+
+```
+#!/bin/bash
+if [[ "$1" == "add" || "$1" == "update" ]]; then
+    userHash=$(echo $3 | sha256sum | cut -d' ' -f1)
+    wget -q -O - --header="Accept: application/json" --header="Content-Type: application/json" --post-data="{\"ip\":\"$2\",\"userId\":\"$userHash\"}" http://forwarder:8000/api/v1/map
 fi
 ```
 
@@ -121,7 +129,7 @@ You are supposed to see your server's IP changed
 3. Check if forwarder is redirecting requests to upstream HTTPS proxy
 ```bash
 FORWARDER_IP=`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' forwarder`
-curl --proxytunnel --proxy $FORWARDER_IP:8080 "http://ipinfo.io"
+curl --proxy $FORWARDER_IP:8080 "http://ipinfo.io"
 ```
 You should see different current IP of your server
 
