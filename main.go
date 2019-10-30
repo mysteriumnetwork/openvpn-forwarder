@@ -19,21 +19,17 @@ package main
 
 import (
 	"flag"
-	"io"
 	"log"
-	"net"
 	"net/url"
 	"strings"
 
-	"github.com/inconshreveable/go-vhost"
 	"github.com/mysteriumnetwork/openvpn-forwarder/api"
 	"github.com/mysteriumnetwork/openvpn-forwarder/proxy"
 	netproxy "golang.org/x/net/proxy"
 )
 
+var proxyAddr = flag.String("proxy.bind", ":8080", "Proxy address for incoming connections")
 var proxyAPIAddr = flag.String("proxy.api-bind", ":8000", "HTTP proxy API address")
-var proxyHTTPAddr = flag.String("proxy.http-bind", ":8080", "HTTP proxy address for incoming connections")
-var proxyHTTPSAddr = flag.String("proxy.https-bind", ":8443", "HTTPS proxy address for incoming connections")
 var proxyUpstreamURL = flag.String(
 	"proxy.upstream-url",
 	"",
@@ -52,11 +48,6 @@ var filterZones = FlagArray(
 )
 
 var enableDomainTracer = flag.Bool("enable-domain-tracer", false, "Enable tracing domain names from requests")
-
-type stickyMapper interface {
-	Save(ip string, userID string)
-	Hash(ip string) string
-}
 
 type domainTracker interface {
 	Inc(domain string)
@@ -103,63 +94,9 @@ func main() {
 		log.Printf("Redirecting: * -> %s", dialerUpstreamURL)
 	}
 
-	proxyServer := proxy.NewServer(*proxyHTTPAddr, dialer, sm, domainTracer)
-	log.Print("Serving HTTP proxy on ", *proxyHTTPAddr)
-	go proxyServer.ListenAndServe()
-
-	log.Print("Serving HTTPS proxy on ", *proxyHTTPSAddr)
-	ln, err := net.Listen("tcp", *proxyHTTPSAddr)
-	if err != nil {
-		log.Fatalf("Error listening for https connections - %v", err)
-	}
-	for {
-		c, err := ln.Accept()
-		if err != nil {
-			log.Printf("Error accepting new connection - %v", err)
-			continue
-		}
-		go serveTLS(c, dialer, sm, domainTracer)
-	}
-}
-
-func serveTLS(c net.Conn, dialer netproxy.Dialer, sm stickyMapper, dt domainTracker) {
-	tlsConn, err := vhost.TLS(c)
-	if err != nil {
-		log.Printf("Error accepting new connection - %v", err)
-		return
-	}
-	defer tlsConn.Close()
-
-	if tlsConn.Host() == "" {
-		log.Printf("Cannot support non-SNI enabled TLS sessions")
-		return
-	}
-
-	remoteHost := net.JoinHostPort(tlsConn.Host(), "443")
-	conn, err := dialer.Dial("tcp", remoteHost)
-	if err != nil {
-		log.Printf("Error establishing connection to %s: %v", remoteHost, err)
-		return
-	}
-	defer conn.Close()
-
-	domain := strings.Split(remoteHost, ":")
-	dt.Inc(domain[0])
-
-	if proxyConnection, ok := conn.(*proxy.Connection); ok {
-		clientHost, _, err := net.SplitHostPort(c.RemoteAddr().String())
-		if err != nil {
-			log.Printf("Failed to get host from address %s: %v", c.RemoteAddr(), err)
-			return
-		}
-		if err := proxyConnection.ConnectTo(conn, remoteHost, sm.Hash(clientHost)); err != nil {
-			log.Printf("Error establishing CONNECT tunnel to %s: %v", remoteHost, err)
-			return
-		}
-	}
-
-	go io.Copy(conn, tlsConn)
-	io.Copy(tlsConn, conn)
+	proxyServer := proxy.NewServer(*proxyAddr, dialer, sm, domainTracer)
+	log.Print("Serving proxy requests on ", *proxyAddr)
+	proxyServer.ListenAndServe()
 }
 
 // FlagArray defines a string array flag

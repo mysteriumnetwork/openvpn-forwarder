@@ -18,74 +18,135 @@
 package proxy
 
 import (
-	"bufio"
-	"fmt"
+	"io"
+	"log"
 	"net"
-	"net/http"
+	"net/http/httputil"
 	"strings"
 
-	"github.com/elazarl/goproxy"
+	"github.com/inconshreveable/go-vhost"
+	"github.com/pkg/errors"
+	"github.com/soheilhy/cmux"
 	netproxy "golang.org/x/net/proxy"
 )
-
-type stickyHasher interface {
-	Hash(ip string) string
-}
 
 type domainTracker interface {
 	Inc(domain string)
 }
 
+type proxyServer struct {
+	addr   string
+	dialer netproxy.Dialer
+	sm     *stickyMapper
+	dt     domainTracker
+}
+
 // NewServer returns new instance of HTTP transparent proxy server
-func NewServer(addr string, upstreamDialer netproxy.Dialer, mapper stickyHasher, dt domainTracker) *http.Server {
-	server := goproxy.NewProxyHttpServer()
-	server.Verbose = true
-	server.NonproxyHandler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Host == "" {
-			fmt.Fprintln(w, "Cannot handle requests without Host header, e.g., HTTP 1.0")
-			return
-		}
-		req.URL.Scheme = "http"
-		req.URL.Host = req.Host
-		server.ServeHTTP(w, req)
-	})
-
-	server.ConnectDial = upstreamDialer.Dial
-	server.OnRequest().HandleConnectFunc(func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
-		return goproxy.OkConnect, host
-	})
-
-	server.OnRequest().DoFunc(func(req *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-		conn, err := upstreamDialer.Dial("tcp", req.Host+":80")
-		if err != nil {
-			return req, nil
-		}
-
-		domain := strings.Split(req.Host, ":")
-		dt.Inc(domain[0])
-
-		if proxyConnection, ok := conn.(*Connection); ok {
-			clientHost, _, _ := net.SplitHostPort(req.RemoteAddr)
-			if err := proxyConnection.ConnectTo(conn, req.Host+":80", mapper.Hash(clientHost)); err != nil {
-				return req, nil
-			}
-		}
-
-		err = req.Write(conn)
-		if err != nil {
-			return req, nil
-		}
-
-		resp, err := http.ReadResponse(bufio.NewReader(conn), req)
-		if err != nil {
-			return req, nil
-		}
-
-		return req, resp
-	})
-
-	return &http.Server{
-		Addr:    addr,
-		Handler: server,
+func NewServer(addr string, upstreamDialer netproxy.Dialer, mapper *stickyMapper, dt domainTracker) *proxyServer {
+	return &proxyServer{
+		addr:   addr,
+		dialer: upstreamDialer,
+		sm:     mapper,
+		dt:     dt,
 	}
+}
+
+func (s *proxyServer) ListenAndServe() {
+	ln, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		log.Fatalf("Error listening for https connections - %v", err)
+	}
+
+	m := cmux.New(ln)
+
+	httpsL := m.Match(cmux.TLS())
+	httpL := m.Match(cmux.HTTP1Fast())
+
+	go s.handler(httpL, s.serveHTTP)
+	go s.handler(httpsL, s.serveTLS)
+
+	m.Serve()
+}
+
+func (s *proxyServer) handler(l net.Listener, f func(c net.Conn)) {
+	for {
+		c, err := l.Accept()
+		if err != nil {
+			log.Printf("Error accepting new connection - %v", err)
+			continue
+		}
+		go f(c)
+	}
+}
+
+func (s *proxyServer) serveHTTP(c net.Conn) {
+	sc := httputil.NewServerConn(c, nil)
+	req, err := sc.Read()
+	if err != nil {
+		log.Printf("Failed to read HTTP request: %v", err)
+		return
+	}
+
+	remoteHost := net.JoinHostPort(req.Host, "80")
+	conn, err := s.connectTo(c, remoteHost)
+	if err != nil {
+		log.Printf("Error establishing connection to %s: %v", remoteHost, err)
+		return
+	}
+	defer conn.Close()
+
+	if err := req.Write(conn); err != nil {
+		log.Printf("Failed to forward HTTP request to %s: %v", remoteHost, err)
+		return
+	}
+
+	go io.Copy(conn, c)
+	io.Copy(c, conn)
+}
+
+func (s *proxyServer) serveTLS(c net.Conn) {
+	tlsConn, err := vhost.TLS(c)
+	if err != nil {
+		log.Printf("Error accepting new connection - %v", err)
+		return
+	}
+	defer tlsConn.Close()
+
+	if tlsConn.Host() == "" {
+		log.Printf("Cannot support non-SNI enabled TLS sessions")
+		return
+	}
+
+	remoteHost := net.JoinHostPort(tlsConn.Host(), "443")
+	conn, err := s.connectTo(c, remoteHost)
+	if err != nil {
+		log.Printf("Error establishing connection to %s: %v", remoteHost, err)
+		return
+	}
+	defer conn.Close()
+
+	go io.Copy(conn, tlsConn)
+	io.Copy(tlsConn, conn)
+}
+
+func (s *proxyServer) connectTo(c net.Conn, remoteHost string) (net.Conn, error) {
+	conn, err := s.dialer.Dial("tcp", remoteHost)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to establish connection")
+	}
+
+	domain := strings.Split(remoteHost, ":")
+	s.dt.Inc(domain[0])
+
+	if proxyConnection, ok := conn.(*Connection); ok {
+		clientHost, _, err := net.SplitHostPort(c.RemoteAddr().String())
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to get host from address")
+		}
+		if err := proxyConnection.ConnectTo(conn, remoteHost, s.sm.Hash(clientHost)); err != nil {
+			return nil, errors.Wrap(err, "failed to establish CONNECT tunnel")
+		}
+	}
+
+	return conn, nil
 }
