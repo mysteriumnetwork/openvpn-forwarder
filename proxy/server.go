@@ -21,6 +21,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"net/http/httputil"
 	"strings"
 
@@ -35,24 +36,29 @@ type domainTracker interface {
 }
 
 type proxyServer struct {
-	addr   string
-	dialer netproxy.Dialer
-	sm     *stickyMapper
-	dt     domainTracker
+	dialer  netproxy.Dialer
+	sm      StickyMapper
+	dt      domainTracker
+	portMap map[string]string
+}
+
+type StickyMapper interface {
+	Save(ip, userID string)
+	Hash(ip string) (hash string)
 }
 
 // NewServer returns new instance of HTTP transparent proxy server
-func NewServer(addr string, upstreamDialer netproxy.Dialer, mapper *stickyMapper, dt domainTracker) *proxyServer {
+func NewServer(upstreamDialer netproxy.Dialer, mapper StickyMapper, dt domainTracker, portMap map[string]string) *proxyServer {
 	return &proxyServer{
-		addr:   addr,
-		dialer: upstreamDialer,
-		sm:     mapper,
-		dt:     dt,
+		dialer:  upstreamDialer,
+		sm:      mapper,
+		dt:      dt,
+		portMap: portMap,
 	}
 }
 
-func (s *proxyServer) ListenAndServe() {
-	ln, err := net.Listen("tcp", s.addr)
+func (s *proxyServer) ListenAndServe(addr string) {
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		log.Fatalf("Error listening for https connections - %v", err)
 	}
@@ -75,7 +81,10 @@ func (s *proxyServer) handler(l net.Listener, f func(c net.Conn)) {
 			log.Printf("Error accepting new connection - %v", err)
 			continue
 		}
-		go f(c)
+		go func() {
+			f(c)
+			c.Close()
+		}()
 	}
 }
 
@@ -87,7 +96,7 @@ func (s *proxyServer) serveHTTP(c net.Conn) {
 		return
 	}
 
-	remoteHost := net.JoinHostPort(req.Host, "80")
+	remoteHost := s.authorityAddr("http", req.Host)
 	conn, err := s.connectTo(c, remoteHost)
 	if err != nil {
 		log.Printf("Error establishing connection to %s: %v", remoteHost, err)
@@ -95,13 +104,31 @@ func (s *proxyServer) serveHTTP(c net.Conn) {
 	}
 	defer conn.Close()
 
-	if err := req.Write(conn); err != nil {
+	if req.Method == http.MethodConnect {
+		c.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
+	} else if err := req.Write(conn); err != nil {
 		log.Printf("Failed to forward HTTP request to %s: %v", remoteHost, err)
 		return
 	}
 
 	go io.Copy(conn, c)
 	io.Copy(c, conn)
+}
+
+func (s *proxyServer) authorityAddr(scheme, authority string) string {
+	host, port, err := net.SplitHostPort(authority)
+	if err != nil {
+		port = "443"
+		if scheme == "http" {
+			port = "80"
+		}
+		host = authority
+	}
+
+	if p, ok := s.portMap[port]; ok {
+		port = p
+	}
+	return net.JoinHostPort(host, port)
 }
 
 func (s *proxyServer) serveTLS(c net.Conn) {
@@ -117,7 +144,13 @@ func (s *proxyServer) serveTLS(c net.Conn) {
 		return
 	}
 
-	remoteHost := net.JoinHostPort(tlsConn.Host(), "443")
+	_, port, err := net.SplitHostPort(tlsConn.LocalAddr().String())
+	if err != nil {
+		log.Printf("Cannot parse local address")
+		return
+	}
+
+	remoteHost := s.authorityAddr("https", tlsConn.Host()+":"+port)
 	conn, err := s.connectTo(c, remoteHost)
 	if err != nil {
 		log.Printf("Error establishing connection to %s: %v", remoteHost, err)

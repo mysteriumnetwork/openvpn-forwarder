@@ -20,20 +20,26 @@ package main
 import (
 	"flag"
 	"log"
+	"net"
 	"net/url"
 	"strings"
+	"sync"
 
 	"github.com/mysteriumnetwork/openvpn-forwarder/api"
 	"github.com/mysteriumnetwork/openvpn-forwarder/proxy"
 	netproxy "golang.org/x/net/proxy"
 )
 
-var proxyAddr = flag.String("proxy.bind", ":8080", "Proxy address for incoming connections")
+var proxyAddr = flag.String("proxy.bind", ":8443", "Proxy address for incoming connections")
 var proxyAPIAddr = flag.String("proxy.api-bind", ":8000", "HTTP proxy API address")
 var proxyUpstreamURL = flag.String(
 	"proxy.upstream-url",
 	"",
 	`Upstream HTTPS proxy where to forward traffic (e.g. "http://superproxy.com:8080")`,
+)
+var proxyMapPort = FlagArray(
+	"proxy.map.port",
+	`Explicitly map source port to destination port (separated by comma - "8443:443,18443:8443")`,
 )
 
 var stickyStoragePath = flag.String("stickiness-db-path", proxy.MemoryStorage, "Path to the database for stickiness mapping")
@@ -94,9 +100,37 @@ func main() {
 		log.Printf("Redirecting: * -> %s", dialerUpstreamURL)
 	}
 
-	proxyServer := proxy.NewServer(*proxyAddr, dialer, sm, domainTracer)
-	log.Print("Serving proxy requests on ", *proxyAddr)
-	proxyServer.ListenAndServe()
+	portMap := parsePortMap(*proxyMapPort, *proxyAddr)
+	proxyServer := proxy.NewServer(dialer, sm, domainTracer, portMap)
+
+	var wg sync.WaitGroup
+	for p := range portMap {
+		wg.Add(1)
+		go func(p string) {
+			log.Print("Serving HTTPS proxy on :", p)
+			proxyServer.ListenAndServe(":" + p)
+			wg.Done()
+		}(p)
+	}
+
+	wg.Wait()
+}
+
+func parsePortMap(ports flagArray, proxyAddr string) map[string]string {
+	_, port, err := net.SplitHostPort(proxyAddr)
+	if err != nil {
+		log.Fatalf("Failed to parse port: %s", proxyAddr)
+	}
+
+	portsMap := map[string]string{port: "443"}
+	for _, p := range ports {
+		portMap := strings.Split(p, ":")
+		if len(portMap) != 2 {
+			log.Fatalf("Failed to parse port mapping: %s", p)
+		}
+		portsMap[portMap[0]] = portMap[1]
+	}
+	return portsMap
 }
 
 // FlagArray defines a string array flag
