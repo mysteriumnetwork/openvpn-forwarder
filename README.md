@@ -1,30 +1,24 @@
-# Openvpn Forwarder
-Forward Openvpn traffic to Mysterium Network nodes
-
-
+# OpenVPN Forwarder
+Forward OpenVPN traffic to Mysterium Network nodes
 
 ## Quickstart
-
 Build and run the service via `make build run`
 
-
-
-## Redirect Openvpn's traffic (from host machine)
-Lets assume:
+## Redirect Openvpn's traffic (from the host machine)
+Let's assume:
 - You are SSH'ed to server
-- You run Openvpn server on host machine here
+- You run OpenVPN server on host machine here
 
-1. Run forwarder as Docker container:
+1. Run forwarder as a Docker container:
 ```bash
-docker run -d --name forwarder -p 127.0.0.1:8080:8080 -p 127.0.0.1:8443:8443 --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
+docker run -d --name forwarder -p 127.0.0.1:8443:8443 --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
     --proxy.upstream-url="http://superproxy.com:8080" \
     --filter.hostnames="ipinfo.io"
 ```
 
 2. Redirect HTTP ports to forwarder:
 ```bash
-iptables -t nat -A PREROUTING -p tcp -m tcp --dport 80 -j DNAT --to-destination 172.18.0.4:8080
-iptables -t nat -A PREROUTING -p tcp -m tcp --dport 443 -j DNAT --to-destination 172.18.0.4:8443
+iptables -t nat -A PREROUTING -p tcp -m multiport --dports 80,443 -j DNAT --to-destination 172.18.0.4:8443
 ```
 
 3. Forwarder redirects HTTP traffic to upstream HTTPS proxy (this case just hostname 'ipinfo.io'):
@@ -34,15 +28,13 @@ curl "http://ipinfo.io/"
 curl "https://ipinfo.io/"
 ```
 
-
-
-## Redirect Openvpn's traffic (from Docker container)
-Lets assume:
+## Redirect OpenVPN's traffic (from Docker container)
+Let's assume:
 - You are SSH'ed to server
-- You run Openvpn server inside Docker container named 'openvpn'
-- Your Openvpn container is assigned to Docker network 'openvpn_network'
+- You run OpenVPN server inside Docker container named 'openvpn'
+- Your OpenVPN container is assigned to Docker network 'openvpn_network'
 
-1. Run forwarder as Docker container:
+1. Run forwarder as a Docker container:
 ```bash
 docker run -d --name forwarder --net openvpn_network --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
     --proxy.upstream-url="http://superproxy.com:8080" \
@@ -56,8 +48,7 @@ FORWARDER_IP=`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress
 
 3. Redirect HTTP ports to forwarder (from Docker container):
 ```bash
-docker exec -it openvpn iptables -t nat -A PREROUTING -p tcp -m tcp --dport 80 -j DNAT --to-destination $FORWARDER_IP:8080
-docker exec -it openvpn iptables -t nat -A PREROUTING -p tcp -m tcp --dport 443 -j DNAT --to-destination $FORWARDER_IP:8443
+docker exec -it openvpn iptables -t nat -A PREROUTING -p tcp -m multiport --dports 80,443 -j DNAT --to-destination $FORWARDER_IP:8443
 ```
 
 4. Forwarder redirects HTTP traffic to upstream HTTPS proxy (this case just 2 hostnames):
@@ -140,6 +131,27 @@ OR
 docker exec -it openvpn wget -q -O - "https://ipinfo.io/"
 ```
 
+## Forward non-standard ports to OpenVPN forwarder
+By default, OpenVPN forwarder listen ':8443' port and sends traffic to the standard port only
+ - `:80` for HTTP traffic
+ - `:443` for HTTPS traffic
+
+If you need to forward non standard port too, the following steps required:
+
+1. Start OpenVPN forwarder with the `--proxy.map.port` flag:
+```bash
+docker run -d --name forwarder -p 127.0.0.1:8443:8443 --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
+    --proxy.upstream-url="http://superproxy.com:8080" \
+    --proxy.map.port=18443:8443,1234:1234
+```
+
+2. Apply additional iptables rule to forward required traffic:
+```bash
+docker exec -it openvpn iptables -t nat -A PREROUTING -p tcp -m tcp --dport 8443 -j DNAT --to-destination $FORWARDER_IP:18443
+docker exec -it openvpn iptables -t nat -A PREROUTING -p tcp -m tcp --dport 1234 -j DNAT --to-destination $FORWARDER_IP:1234
+```
+
+This will allow keeping the original non-standard port.
 
 ## License
 
