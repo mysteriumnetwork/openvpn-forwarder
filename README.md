@@ -104,9 +104,12 @@ Execute the following command on the `openvpn` container:
 docker exec -it openvpn iptables -t nat -A POSTROUTING ! -d forwarder -j MASQUERADE
 ```
 
-And the following route needs to be added to the `forwarder` container:
+And the `forwarder` container should be started with the following environment variables:
 ```
-docker exec -it forwarder route add -net 192.168.255.0/24 gw openvpn
+docker run -d --name forwarder --net openvpn_network -e "OPENVPN_SUBNET=192.168.255.0/24" -e "OPENVPN_SERVER=openvpn" \
+    --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
+    --proxy.upstream-url="http://superproxy.com:8080" \
+    --filter.hostnames="ipinfo.io,whatismyipaddress.com"
 ```
 
 * `192.168.255.0/24` - is a OpenVPN subnet that will be used for virtual IPs of clients;
