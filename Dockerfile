@@ -19,4 +19,5 @@ RUN apk add --update --no-cache iptables \
     && rm -rf /var/cache/apk/*
 
 COPY --from=builder /go/src/github.com/mysteriumnetwork/openvpn-forwarder/build/forwarder forwarder
-ENTRYPOINT ["/forwarder"]
+ADD entrypoint.sh /
+ENTRYPOINT ["/entrypoint.sh"]
