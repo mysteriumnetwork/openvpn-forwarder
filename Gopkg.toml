@@ -26,8 +26,8 @@
 
 
 [[constraint]]
-  name = "github.com/elazarl/goproxy"
-  version = "1.1.0"
+  name = "github.com/soheilhy/cmux"
+  version = "0.1.4"
 
 [[constraint]]
   name = "github.com/inconshreveable/go-vhost"
@@ -40,10 +40,6 @@
 [[constraint]]
   branch = "master"
   name = "golang.org/x/net"
-
-[[constraint]]
-  name = "github.com/cihub/seelog"
-  version = "2.6.0"
 
 [[constraint]]
   version = "1.4.0"

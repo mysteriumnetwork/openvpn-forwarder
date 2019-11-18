@@ -19,34 +19,34 @@ package proxy
 
 import (
 	"bufio"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"sync"
 	"testing"
+	"time"
 
-	"net/http/httptest"
-
+	"github.com/soheilhy/cmux"
 	"github.com/stretchr/testify/assert"
 )
 
 func Test_Server_ServeHTTP(t *testing.T) {
-	t.Skip()
-
 	upstreamServer := upstreamServerStub{}
-	upstreamServer.run()
+	upstreamAddr := upstreamServer.run()
 	defer upstreamServer.stop()
 
-	upstreamDialer := NewDialerHTTPConnect(DialerDirect, "http://localhost:6969")
+	upstreamDialer := NewDialerHTTPConnect(DialerDirect, upstreamAddr)
 
 	req, _ := http.NewRequest("GET", "http://domain.com", nil)
-	resp := httptest.NewRecorder()
 
-	proxyServer := NewServer("", upstreamDialer, &stickyMapperStub{}, &noopTracer{})
-	proxyServer.Handler.ServeHTTP(resp, req)
+	proxyServer := NewServer(upstreamDialer, &stickyMapperStub{}, &noopTracer{}, nil)
+	proxyAddr := listenAndServe(proxyServer)
 
-	t.Log(resp.Code)
-	t.Log(resp.Body.String())
+	proxyURL, _ := url.Parse("http://" + proxyAddr)
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	client := &http.Client{Transport: transport}
+	client.Do(req)
 
 	upstreamReq := upstreamServer.getLastRequest()
 	assert.NoError(t, upstreamServer.getLastError())
@@ -57,8 +57,29 @@ func Test_Server_ServeHTTP(t *testing.T) {
 	assert.Equal(t, "domain.com:80", upstreamReq.RequestURI)
 }
 
+func listenAndServe(s *proxyServer) string {
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		log.Fatalf("Error listening for https connections - %v", err)
+	}
+
+	m := cmux.New(ln)
+
+	httpsL := m.Match(cmux.TLS())
+	httpL := m.Match(cmux.HTTP1Fast())
+
+	go s.handler(httpL, s.serveHTTP)
+	go s.handler(httpsL, s.serveTLS)
+
+	go m.Serve()
+	time.Sleep(100 * time.Millisecond) // waiting for server to start
+
+	return ln.Addr().String()
+}
+
 type stickyMapperStub struct{}
 
+func (sms *stickyMapperStub) Save(ip, userID string) {}
 func (sms *stickyMapperStub) Hash(ip string) string {
 	return "stubhash"
 }
@@ -72,13 +93,13 @@ type upstreamServerStub struct {
 	mu          sync.Mutex
 }
 
-func (server *upstreamServerStub) run() {
-	l, err := net.Listen("tcp", ":6969")
+func (server *upstreamServerStub) run() string {
+	l, err := net.Listen("tcp", ":0")
 	server.mu.Lock()
 	server.listener, server.lastError = l, err
 	server.mu.Unlock()
 	if err != nil {
-		return
+		return ""
 	}
 
 	go func() {
@@ -100,7 +121,9 @@ func (server *upstreamServerStub) run() {
 
 		resp := http.Response{StatusCode: 200, Proto: "HTTP/1.0"}
 		resp.Write(server.conn)
+		c.Close()
 	}()
+	return l.Addr().String()
 }
 
 func (server *upstreamServerStub) stop() {

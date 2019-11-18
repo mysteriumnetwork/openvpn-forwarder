@@ -19,25 +19,28 @@ package main
 
 import (
 	"flag"
-	"io"
 	"log"
 	"net"
 	"net/url"
 	"strings"
+	"sync"
 
-	"github.com/inconshreveable/go-vhost"
 	"github.com/mysteriumnetwork/openvpn-forwarder/api"
 	"github.com/mysteriumnetwork/openvpn-forwarder/proxy"
+	"github.com/pkg/errors"
 	netproxy "golang.org/x/net/proxy"
 )
 
+var proxyAddr = flag.String("proxy.bind", ":8443", "Proxy address for incoming connections")
 var proxyAPIAddr = flag.String("proxy.api-bind", ":8000", "HTTP proxy API address")
-var proxyHTTPAddr = flag.String("proxy.http-bind", ":8080", "HTTP proxy address for incoming connections")
-var proxyHTTPSAddr = flag.String("proxy.https-bind", ":8443", "HTTPS proxy address for incoming connections")
 var proxyUpstreamURL = flag.String(
 	"proxy.upstream-url",
 	"",
 	`Upstream HTTPS proxy where to forward traffic (e.g. "http://superproxy.com:8080")`,
+)
+var proxyMapPort = FlagArray(
+	"proxy.port-map",
+	`Explicitly map source port to destination port (separated by comma - "8443:443,18443:8443")`,
 )
 
 var stickyStoragePath = flag.String("stickiness-db-path", proxy.MemoryStorage, "Path to the database for stickiness mapping")
@@ -52,11 +55,6 @@ var filterZones = FlagArray(
 )
 
 var enableDomainTracer = flag.Bool("enable-domain-tracer", false, "Enable tracing domain names from requests")
-
-type stickyMapper interface {
-	Save(ip string, userID string)
-	Hash(ip string) string
-}
 
 type domainTracker interface {
 	Inc(domain string)
@@ -103,63 +101,43 @@ func main() {
 		log.Printf("Redirecting: * -> %s", dialerUpstreamURL)
 	}
 
-	proxyServer := proxy.NewServer(*proxyHTTPAddr, dialer, sm, domainTracer)
-	log.Print("Serving HTTP proxy on ", *proxyHTTPAddr)
-	go proxyServer.ListenAndServe()
-
-	log.Print("Serving HTTPS proxy on ", *proxyHTTPSAddr)
-	ln, err := net.Listen("tcp", *proxyHTTPSAddr)
+	portMap, err := parsePortMap(*proxyMapPort, *proxyAddr)
 	if err != nil {
-		log.Fatalf("Error listening for https connections - %v", err)
+		log.Fatal(err)
 	}
-	for {
-		c, err := ln.Accept()
-		if err != nil {
-			log.Printf("Error accepting new connection - %v", err)
-			continue
-		}
-		go serveTLS(c, dialer, sm, domainTracer)
+	proxyServer := proxy.NewServer(dialer, sm, domainTracer, portMap)
+
+	var wg sync.WaitGroup
+	for p := range portMap {
+		wg.Add(1)
+		go func(p string) {
+			log.Print("Serving HTTPS proxy on :", p)
+			if err := proxyServer.ListenAndServe(":" + p); err != nil {
+				log.Fatalf("Failed to listen http requests: %v", err)
+			}
+			wg.Done()
+		}(p)
 	}
+
+	wg.Wait()
 }
 
-func serveTLS(c net.Conn, dialer netproxy.Dialer, sm stickyMapper, dt domainTracker) {
-	tlsConn, err := vhost.TLS(c)
+func parsePortMap(ports flagArray, proxyAddr string) (map[string]string, error) {
+	_, port, err := net.SplitHostPort(proxyAddr)
 	if err != nil {
-		log.Printf("Error accepting new connection - %v", err)
-		return
-	}
-	defer tlsConn.Close()
-
-	if tlsConn.Host() == "" {
-		log.Printf("Cannot support non-SNI enabled TLS sessions")
-		return
+		return nil, errors.Wrap(err, "failed to parse port")
 	}
 
-	remoteHost := net.JoinHostPort(tlsConn.Host(), "443")
-	conn, err := dialer.Dial("tcp", remoteHost)
-	if err != nil {
-		log.Printf("Error establishing connection to %s: %v", remoteHost, err)
-		return
-	}
-	defer conn.Close()
+	portsMap := map[string]string{port: "443"}
 
-	domain := strings.Split(remoteHost, ":")
-	dt.Inc(domain[0])
-
-	if proxyConnection, ok := conn.(*proxy.Connection); ok {
-		clientHost, _, err := net.SplitHostPort(c.RemoteAddr().String())
-		if err != nil {
-			log.Printf("Failed to get host from address %s: %v", c.RemoteAddr(), err)
-			return
+	for _, p := range ports {
+		portMap := strings.Split(p, ":")
+		if len(portMap) != 2 {
+			return nil, errors.Errorf("failed to parse port mapping: %s", p)
 		}
-		if err := proxyConnection.ConnectTo(conn, remoteHost, sm.Hash(clientHost)); err != nil {
-			log.Printf("Error establishing CONNECT tunnel to %s: %v", remoteHost, err)
-			return
-		}
+		portsMap[portMap[0]] = portMap[1]
 	}
-
-	go io.Copy(conn, tlsConn)
-	io.Copy(tlsConn, conn)
+	return portsMap, nil
 }
 
 // FlagArray defines a string array flag
