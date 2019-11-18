@@ -27,6 +27,7 @@ import (
 
 	"github.com/mysteriumnetwork/openvpn-forwarder/api"
 	"github.com/mysteriumnetwork/openvpn-forwarder/proxy"
+	"github.com/pkg/errors"
 	netproxy "golang.org/x/net/proxy"
 )
 
@@ -38,7 +39,7 @@ var proxyUpstreamURL = flag.String(
 	`Upstream HTTPS proxy where to forward traffic (e.g. "http://superproxy.com:8080")`,
 )
 var proxyMapPort = FlagArray(
-	"proxy.map.port",
+	"proxy.port-map",
 	`Explicitly map source port to destination port (separated by comma - "8443:443,18443:8443")`,
 )
 
@@ -100,7 +101,10 @@ func main() {
 		log.Printf("Redirecting: * -> %s", dialerUpstreamURL)
 	}
 
-	portMap := parsePortMap(*proxyMapPort, *proxyAddr)
+	portMap, err := parsePortMap(*proxyMapPort, *proxyAddr)
+	if err != nil {
+		log.Fatal(err)
+	}
 	proxyServer := proxy.NewServer(dialer, sm, domainTracer, portMap)
 
 	var wg sync.WaitGroup
@@ -108,7 +112,9 @@ func main() {
 		wg.Add(1)
 		go func(p string) {
 			log.Print("Serving HTTPS proxy on :", p)
-			proxyServer.ListenAndServe(":" + p)
+			if err := proxyServer.ListenAndServe(":" + p); err != nil {
+				log.Fatalf("Failed to listen http requests: %v", err)
+			}
 			wg.Done()
 		}(p)
 	}
@@ -116,21 +122,22 @@ func main() {
 	wg.Wait()
 }
 
-func parsePortMap(ports flagArray, proxyAddr string) map[string]string {
+func parsePortMap(ports flagArray, proxyAddr string) (map[string]string, error) {
 	_, port, err := net.SplitHostPort(proxyAddr)
 	if err != nil {
-		log.Fatalf("Failed to parse port: %s", proxyAddr)
+		return nil, errors.Wrap(err, "failed to parse port")
 	}
 
 	portsMap := map[string]string{port: "443"}
+
 	for _, p := range ports {
 		portMap := strings.Split(p, ":")
 		if len(portMap) != 2 {
-			log.Fatalf("Failed to parse port mapping: %s", p)
+			return nil, errors.Errorf("failed to parse port mapping: %s", p)
 		}
 		portsMap[portMap[0]] = portMap[1]
 	}
-	return portsMap
+	return portsMap, nil
 }
 
 // FlagArray defines a string array flag

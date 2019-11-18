@@ -138,11 +138,11 @@ By default, OpenVPN forwarder listen ':8443' port and sends traffic to the stand
 
 If you need to forward non standard port too, the following steps required:
 
-1. Start OpenVPN forwarder with the `--proxy.map.port` flag:
+1. Start OpenVPN forwarder with the `--proxy.port-map` flag:
 ```bash
 docker run -d --name forwarder -p 127.0.0.1:8443:8443 --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
     --proxy.upstream-url="http://superproxy.com:8080" \
-    --proxy.map.port=18443:8443,1234:1234
+    --proxy.port-map=18443:8443,1234:1234
 ```
 
 2. Apply additional iptables rule to forward required traffic:

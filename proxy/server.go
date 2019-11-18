@@ -42,6 +42,7 @@ type proxyServer struct {
 	portMap map[string]string
 }
 
+// StickyMapper represent connection stickiness storage.
 type StickyMapper interface {
 	Save(ip, userID string)
 	Hash(ip string) (hash string)
@@ -57,10 +58,10 @@ func NewServer(upstreamDialer netproxy.Dialer, mapper StickyMapper, dt domainTra
 	}
 }
 
-func (s *proxyServer) ListenAndServe(addr string) {
+func (s *proxyServer) ListenAndServe(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatalf("Error listening for https connections - %v", err)
+		return errors.Wrap(err, "failed to listen http connections")
 	}
 
 	m := cmux.New(ln)
@@ -71,7 +72,7 @@ func (s *proxyServer) ListenAndServe(addr string) {
 	go s.handler(httpL, s.serveHTTP)
 	go s.handler(httpsL, s.serveTLS)
 
-	m.Serve()
+	return m.Serve()
 }
 
 func (s *proxyServer) handler(l net.Listener, f func(c net.Conn)) {
