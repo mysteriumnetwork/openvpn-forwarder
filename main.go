@@ -38,6 +38,8 @@ var proxyUpstreamURL = flag.String(
 	"",
 	`Upstream HTTPS proxy where to forward traffic (e.g. "http://superproxy.com:8080")`,
 )
+var proxyUser = flag.String("proxy.user", "", "HTTP proxy auth user")
+var proxyPass = flag.String("proxy.pass", "", "HTTP proxy auth password")
 var proxyMapPort = FlagArray(
 	"proxy.port-map",
 	`Explicitly map source port to destination port (separated by comma - "8443:443,18443:8443")`,
@@ -82,7 +84,7 @@ func main() {
 	apiServer := api.NewServer(*proxyAPIAddr, sm, domainTracer)
 	go apiServer.ListenAndServe()
 
-	dialerUpstream := proxy.NewDialerHTTPConnect(proxy.DialerDirect, dialerUpstreamURL.Host)
+	dialerUpstream := proxy.NewDialerHTTPConnect(proxy.DialerDirect, dialerUpstreamURL.Host, *proxyUser, *proxyPass)
 
 	var dialer netproxy.Dialer
 	if len(*filterHostnames) > 0 || len(*filterZones) > 0 {

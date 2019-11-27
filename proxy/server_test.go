@@ -36,7 +36,7 @@ func Test_Server_ServeHTTP(t *testing.T) {
 	upstreamAddr := upstreamServer.run()
 	defer upstreamServer.stop()
 
-	upstreamDialer := NewDialerHTTPConnect(DialerDirect, upstreamAddr)
+	upstreamDialer := NewDialerHTTPConnect(DialerDirect, upstreamAddr, "", "")
 
 	req, _ := http.NewRequest("GET", "http://domain.com", nil)
 
@@ -55,6 +55,28 @@ func Test_Server_ServeHTTP(t *testing.T) {
 	assert.Equal(t, &url.URL{Host: "domain.com:80"}, upstreamReq.URL)
 	assert.Equal(t, "domain.com:80", upstreamReq.Host)
 	assert.Equal(t, "domain.com:80", upstreamReq.RequestURI)
+	assert.Empty(t, upstreamReq.Header.Get("Authorization"))
+}
+
+func Test_Server_AuthHeaderAdded(t *testing.T) {
+	upstreamServer := upstreamServerStub{}
+	upstreamAddr := upstreamServer.run()
+	defer upstreamServer.stop()
+
+	upstreamDialer := NewDialerHTTPConnect(DialerDirect, upstreamAddr, "uuuu", "1234")
+
+	req, _ := http.NewRequest("GET", "http://domain.com", nil)
+
+	proxyServer := NewServer(upstreamDialer, &stickyMapperStub{}, &noopTracer{}, nil)
+	proxyAddr := listenAndServe(proxyServer)
+
+	proxyURL, _ := url.Parse("http://" + proxyAddr)
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	client := &http.Client{Transport: transport}
+	client.Do(req)
+
+	upstreamReq := upstreamServer.getLastRequest()
+	assert.Equal(t, upstreamReq.Header.Get("Authorization"), "Basic dXV1dToxMjM0")
 }
 
 func listenAndServe(s *proxyServer) string {
