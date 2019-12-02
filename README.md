@@ -97,7 +97,7 @@ docker exec -it openvpn iptables -t nat -A POSTROUTING ! -d forwarder -j MASQUER
 
 And the `forwarder` container should be started with the following environment variables:
 ```
-docker run -d --restart=on-failure --name forwarder --net openvpn_network -e "OPENVPN_SUBNET=192.168.255.0/24" -e "OPENVPN_SERVER=openvpn" \
+docker run -d --restart=on-failure --name forwarder --net openvpn_network -e "EXTRA_ROUTES=192.168.255.0/24:openvpn" \
     --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
     --proxy.upstream-url="http://superproxy.com:8080" \
     --filter.hostnames="ipinfo.io,whatismyipaddress.com"
@@ -107,6 +107,11 @@ docker run -d --restart=on-failure --name forwarder --net openvpn_network -e "OP
 * `forwarder` - is a container name of the OpenVPN-forwarder, this name should resolve from any container in the `openvpn_network` docker network.
 * `openvpn` - is a container name of the OpenVPN server, this name should resolve from any container in the `openvpn_network` docker network.
 
+> **Note**: `EXTRA_ROUTES` environment varialbe can contain multiple comma separated routes:
+>
+> `-e "EXTRA_ROUTES=192.168.255.0/24:openvpn,192.168.254.0/24:172.16.1.1"`
+>
+> The `192.168.254.0/24:172.16.1.1` pair represent destination subnet and gateway that will be used for it.
 
 ## Debugging of traffic
 1. Check your server's current IP
