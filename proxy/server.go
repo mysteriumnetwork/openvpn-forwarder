@@ -18,11 +18,13 @@
 package proxy
 
 import (
+	"crypto/tls"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"strings"
 
 	"github.com/inconshreveable/go-vhost"
@@ -36,10 +38,11 @@ type domainTracker interface {
 }
 
 type proxyServer struct {
-	dialer  netproxy.Dialer
-	sm      StickyMapper
-	dt      domainTracker
-	portMap map[string]string
+	dialer   netproxy.Dialer
+	sm       StickyMapper
+	dt       domainTracker
+	upstream *url.URL
+	portMap  map[string]string
 }
 
 // StickyMapper represent connection stickiness storage.
@@ -49,12 +52,13 @@ type StickyMapper interface {
 }
 
 // NewServer returns new instance of HTTP transparent proxy server
-func NewServer(upstreamDialer netproxy.Dialer, mapper StickyMapper, dt domainTracker, portMap map[string]string) *proxyServer {
+func NewServer(upstreamDialer netproxy.Dialer, upstreamHost *url.URL, mapper StickyMapper, dt domainTracker, portMap map[string]string) *proxyServer {
 	return &proxyServer{
-		dialer:  upstreamDialer,
-		sm:      mapper,
-		dt:      dt,
-		portMap: portMap,
+		dialer:   upstreamDialer,
+		sm:       mapper,
+		dt:       dt,
+		upstream: upstreamHost,
+		portMap:  portMap,
 	}
 }
 
@@ -163,8 +167,8 @@ func (s *proxyServer) serveTLS(c net.Conn) {
 	io.Copy(tlsConn, conn)
 }
 
-func (s *proxyServer) connectTo(c net.Conn, remoteHost string) (net.Conn, error) {
-	conn, err := s.dialer.Dial("tcp", remoteHost)
+func (s *proxyServer) connectTo(c net.Conn, remoteHost string) (conn io.ReadWriteCloser, err error) {
+	conn, err = s.dialer.Dial("tcp", remoteHost)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to establish connection")
 	}
@@ -173,6 +177,14 @@ func (s *proxyServer) connectTo(c net.Conn, remoteHost string) (net.Conn, error)
 	s.dt.Inc(domain[0])
 
 	if proxyConnection, ok := conn.(*Connection); ok {
+		if s.upstream.Scheme == "https" {
+			tlsConn := tls.Client(conn.(net.Conn), &tls.Config{ServerName: s.upstream.Hostname()})
+			if err := tlsConn.Handshake(); err != nil {
+				return nil, errors.Wrap(err, "failed to perform TLS handshake")
+			}
+			conn = tlsConn
+		}
+
 		clientHost, _, err := net.SplitHostPort(c.RemoteAddr().String())
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to get host from address")

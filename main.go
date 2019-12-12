@@ -67,7 +67,7 @@ func main() {
 	flag.Parse()
 
 	dialerUpstreamURL, err := url.Parse(*proxyUpstreamURL)
-	if err != nil || dialerUpstreamURL.Scheme != "http" {
+	if err != nil {
 		log.Fatalf("Invalid upstream URL: %s", *proxyUpstreamURL)
 	}
 
@@ -107,7 +107,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	proxyServer := proxy.NewServer(dialer, sm, domainTracer, portMap)
+	proxyServer := proxy.NewServer(dialer, dialerUpstreamURL, sm, domainTracer, portMap)
 
 	var wg sync.WaitGroup
 	for p := range portMap {
