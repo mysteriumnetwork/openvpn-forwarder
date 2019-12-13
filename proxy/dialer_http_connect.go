@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -64,7 +65,7 @@ func (dialer *dialerHTTPConnect) Dial(network, address string) (net.Conn, error)
 
 // ConnectTo establishes new CONNECT session within existing connection.
 // It allows to pass UserID to enable sticky sessions.
-func (c *Connection) ConnectTo(conn net.Conn, address string, userID string) error {
+func (c *Connection) ConnectTo(conn io.ReadWriter, address string, userID string) error {
 	req := &http.Request{
 		Method: "CONNECT",
 		URL:    &url.URL{Host: address},

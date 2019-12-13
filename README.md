@@ -12,7 +12,7 @@ Let's assume:
 1. Run forwarder as a Docker container:
 ```bash
 docker run -d --restart=on-failure --name forwarder -p 127.0.0.1:8443:8443 --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
-    --proxy.upstream-url="http://superproxy.com:8080" \
+    --proxy.upstream-url="https://superproxy.com:443" \
     --filter.hostnames="ipinfo.io"
 ```
 
@@ -37,7 +37,7 @@ Let's assume:
 1. Run forwarder as a Docker container:
 ```bash
 docker run -d --restart=on-failure --name forwarder --net openvpn_network --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
-    --proxy.upstream-url="http://superproxy.com:8080" \
+    --proxy.upstream-url="https://superproxy.com:443" \
     --filter.hostnames="ipinfo.io,whatismyipaddress.com"
 ```
 
@@ -99,7 +99,7 @@ And the `forwarder` container should be started with the following environment v
 ```
 docker run -d --restart=on-failure --name forwarder --net openvpn_network -e "EXTRA_ROUTES=192.168.255.0/24:openvpn" \
     --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
-    --proxy.upstream-url="http://superproxy.com:8080" \
+    --proxy.upstream-url="https://superproxy.com:443" \
     --filter.hostnames="ipinfo.io,whatismyipaddress.com"
 ```
 
@@ -149,7 +149,7 @@ If you need to forward non standard port too, the following steps required:
 1. Start OpenVPN forwarder with the `--proxy.port-map` flag:
 ```bash
 docker run -d --restart=on-failure --name forwarder -p 127.0.0.1:8443:8443 --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
-    --proxy.upstream-url="http://superproxy.com:8080" \
+    --proxy.upstream-url="https://superproxy.com:443" \
     --proxy.port-map=18443:8443,1234:1234
 ```
 

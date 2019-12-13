@@ -40,7 +40,7 @@ func Test_Server_ServeHTTP(t *testing.T) {
 
 	req, _ := http.NewRequest("GET", "http://domain.com", nil)
 
-	proxyServer := NewServer(upstreamDialer, &stickyMapperStub{}, &noopTracer{}, nil)
+	proxyServer := NewServer(upstreamDialer, &url.URL{}, &stickyMapperStub{}, &noopTracer{}, nil)
 	proxyAddr := listenAndServe(proxyServer)
 
 	proxyURL, _ := url.Parse("http://" + proxyAddr)
@@ -67,7 +67,7 @@ func Test_Server_AuthHeaderAdded(t *testing.T) {
 
 	req, _ := http.NewRequest("GET", "http://domain.com", nil)
 
-	proxyServer := NewServer(upstreamDialer, &stickyMapperStub{}, &noopTracer{}, nil)
+	proxyServer := NewServer(upstreamDialer, &url.URL{}, &stickyMapperStub{}, &noopTracer{}, nil)
 	proxyAddr := listenAndServe(proxyServer)
 
 	proxyURL, _ := url.Parse("http://" + proxyAddr)
