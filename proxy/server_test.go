@@ -55,7 +55,7 @@ func Test_Server_ServeHTTP(t *testing.T) {
 	assert.Equal(t, &url.URL{Host: "domain.com:80"}, upstreamReq.URL)
 	assert.Equal(t, "domain.com:80", upstreamReq.Host)
 	assert.Equal(t, "domain.com:80", upstreamReq.RequestURI)
-	assert.Empty(t, upstreamReq.Header.Get("Authorization"))
+	assert.Empty(t, upstreamReq.Header.Get("Proxy-Authorization"))
 }
 
 func Test_Server_AuthHeaderAdded(t *testing.T) {
@@ -76,7 +76,7 @@ func Test_Server_AuthHeaderAdded(t *testing.T) {
 	client.Do(req)
 
 	upstreamReq := upstreamServer.getLastRequest()
-	assert.Equal(t, upstreamReq.Header.Get("Authorization"), "Basic dXV1dToxMjM0")
+	assert.Equal(t, upstreamReq.Header.Get("Proxy-Authorization"), "Basic dXV1dToxMjM0")
 }
 
 func listenAndServe(s *proxyServer) string {
