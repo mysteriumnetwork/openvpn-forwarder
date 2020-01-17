@@ -78,7 +78,7 @@ func (c *Connection) ConnectTo(conn io.ReadWriter, address string, userID string
 	}
 
 	if len(c.user) > 0 && len(c.pass) > 0 {
-		req.Header.Add("Authorization", basicAuth(c.user, c.pass))
+		req.Header.Add("Proxy-Authorization", basicAuth(c.user, c.pass))
 	}
 
 	if err := req.Write(conn); err != nil {
