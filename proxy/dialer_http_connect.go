@@ -74,7 +74,7 @@ func (c *Connection) ConnectTo(conn io.ReadWriter, address string, userID string
 	}
 
 	if len(userID) > 0 {
-		req.Header.Add("UserID", userID)
+		req.Header.Add("Forwarded", "UserID="+userID)
 	}
 
 	if len(c.user) > 0 && len(c.pass) > 0 {
