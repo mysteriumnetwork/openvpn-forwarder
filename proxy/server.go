@@ -137,6 +137,14 @@ func (s *proxyServer) authorityAddr(scheme, authority string) string {
 }
 
 func (s *proxyServer) serveTLS(c net.Conn) {
+	defer func() {
+		// For some malformed TLS connection vhost.TLS could panic.
+		// We don't care about a single failed request, service should keep working.
+		if r := recover(); r != nil {
+			log.Println("Recovered panic in serveTLS", r)
+		}
+	}()
+
 	tlsConn, err := vhost.TLS(c)
 	if err != nil {
 		log.Printf("Error accepting new connection - %v", err)
