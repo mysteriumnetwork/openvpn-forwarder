@@ -75,8 +75,8 @@ func (c *Connection) ConnectTo(conn io.ReadWriter, address string, userID string
 		Header: make(http.Header),
 	}
 
-	if len(userID) > 0 {
-		req.Header.Add("Forwarded", "UserID="+userID)
+	if userID != "" {
+		req.Header.Add("User-Id", userID)
 	}
 
 	if c.country != "" {
