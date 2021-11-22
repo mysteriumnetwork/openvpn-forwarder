@@ -36,7 +36,7 @@ func Test_Server_ServeHTTP(t *testing.T) {
 	upstreamAddr := upstreamServer.run()
 	defer upstreamServer.stop()
 
-	upstreamDialer := NewDialerHTTPConnect(DialerDirect, upstreamAddr, "", "")
+	upstreamDialer := NewDialerHTTPConnect(DialerDirect, upstreamAddr, "", "", "")
 
 	req, _ := http.NewRequest("GET", "http://domain.com", nil)
 
@@ -63,7 +63,7 @@ func Test_Server_AuthHeaderAdded(t *testing.T) {
 	upstreamAddr := upstreamServer.run()
 	defer upstreamServer.stop()
 
-	upstreamDialer := NewDialerHTTPConnect(DialerDirect, upstreamAddr, "uuuu", "1234")
+	upstreamDialer := NewDialerHTTPConnect(DialerDirect, upstreamAddr, "uuuu", "1234", "")
 
 	req, _ := http.NewRequest("GET", "http://domain.com", nil)
 

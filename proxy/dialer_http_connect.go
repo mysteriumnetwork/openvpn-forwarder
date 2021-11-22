@@ -31,25 +31,26 @@ import (
 
 // NewDialerHTTPConnect returns a new Dialer that dials through the provided
 // proxy server's network and address.
-func NewDialerHTTPConnect(forwardDialer netproxy.Dialer, forwardAddress, user, pass string) *dialerHTTPConnect {
+func NewDialerHTTPConnect(forwardDialer netproxy.Dialer, forwardAddress, user, pass, country string) *dialerHTTPConnect {
 	return &dialerHTTPConnect{
 		forwardDialer:  forwardDialer,
 		forwardAddress: forwardAddress,
 		user:           user,
 		pass:           pass,
+		country:        country,
 	}
 }
 
 type dialerHTTPConnect struct {
-	forwardDialer  netproxy.Dialer
-	forwardAddress string
-	user, pass     string
+	forwardDialer       netproxy.Dialer
+	forwardAddress      string
+	user, pass, country string
 }
 
 // Connection wraps net.Conn to provide extra method for establishing CONNECT session.
 type Connection struct {
 	net.Conn
-	user, pass string
+	user, pass, country string
 }
 
 // Dial makes actual connection to specified address through intermediate HTTP proxy
@@ -57,9 +58,10 @@ func (dialer *dialerHTTPConnect) Dial(network, address string) (net.Conn, error)
 	conn, err := dialer.forwardDialer.Dial(network, dialer.forwardAddress)
 
 	return &Connection{
-		Conn: conn,
-		user: dialer.user,
-		pass: dialer.pass,
+		Conn:    conn,
+		user:    dialer.user,
+		pass:    dialer.pass,
+		country: dialer.country,
 	}, err
 }
 
@@ -73,8 +75,12 @@ func (c *Connection) ConnectTo(conn io.ReadWriter, address string, userID string
 		Header: make(http.Header),
 	}
 
-	if len(userID) > 0 {
-		req.Header.Add("Forwarded", "UserID="+userID)
+	if userID != "" {
+		req.Header.Add("User-Id", userID)
+	}
+
+	if c.country != "" {
+		req.Header.Add("Country", c.country)
 	}
 
 	if len(c.user) > 0 && len(c.pass) > 0 {
