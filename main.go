@@ -40,6 +40,7 @@ var proxyUpstreamURL = flag.String(
 )
 var proxyUser = flag.String("proxy.user", "", "HTTP proxy auth user")
 var proxyPass = flag.String("proxy.pass", "", "HTTP proxy auth password")
+var proxyCountry = flag.String("proxy.country", "", "HTTP proxy country targeting")
 var proxyMapPort = FlagArray(
 	"proxy.port-map",
 	`Explicitly map source port to destination port (separated by comma - "8443:443,18443:8443")`,
@@ -84,7 +85,7 @@ func main() {
 	apiServer := api.NewServer(*proxyAPIAddr, sm, domainTracer)
 	go apiServer.ListenAndServe()
 
-	dialerUpstream := proxy.NewDialerHTTPConnect(proxy.DialerDirect, dialerUpstreamURL.Host, *proxyUser, *proxyPass)
+	dialerUpstream := proxy.NewDialerHTTPConnect(proxy.DialerDirect, dialerUpstreamURL.Host, *proxyUser, *proxyPass, *proxyCountry)
 
 	var dialer netproxy.Dialer
 	if len(*filterHostnames) > 0 || len(*filterZones) > 0 {
