@@ -38,7 +38,10 @@ func Build() error {
 // Run the application
 func Run() error {
 	return sh.RunV(buildPath,
+		"--proxy.bind=:8443",
 		"--proxy.upstream-url=http://superproxy.com:8080",
+		"--proxy.user=",
+		"--proxy.pass=",
 		"--filter.zones=api.ipify.org",
 		"--exclude.hostnames=ipify.org",
 	)

@@ -128,7 +128,7 @@ You are supposed to see your server's IP changed
 3. Check if forwarder is redirecting requests to upstream HTTPS proxy
 ```bash
 FORWARDER_IP=`docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' forwarder`
-curl --proxy $FORWARDER_IP:8080 "http://ipinfo.io"
+curl --proxy $FORWARDER_IP:8443 "http://ipinfo.io"
 ```
 You should see different current IP of your server
 
