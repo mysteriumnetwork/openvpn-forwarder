@@ -56,6 +56,14 @@ var filterZones = FlagArray(
 	"filter.zones",
 	`Explicitly forward just several DNS zones. A zone of "example.com" matches "example.com" and all of its subdomains. (separated by comma - "ipinfo.io,ipify.org")`,
 )
+var excludeHostnames = FlagArray(
+	"exclude.hostnames",
+	`Exclude from forwarding several hostnames (separated by comma - "ipinfo.io,ipify.org")`,
+)
+var excludeZones = FlagArray(
+	"exclude.zones",
+	`Exclude from forwarding several DNS zones. A zone of "example.com" matches "example.com" and all of its subdomains. (separated by comma - "ipinfo.io,ipify.org")`,
+)
 
 var enableDomainTracer = flag.Bool("enable-domain-tracer", false, "Enable tracing domain names from requests")
 
@@ -89,19 +97,31 @@ func main() {
 
 	var dialer netproxy.Dialer
 	if len(*filterHostnames) > 0 || len(*filterZones) > 0 {
-		dialerPerHost := netproxy.NewPerHost(proxy.DialerDirect, dialerUpstream)
+		dialerUpstreamFiltered := netproxy.NewPerHost(proxy.DialerDirect, dialerUpstream)
 		for _, host := range *filterHostnames {
 			log.Printf("Redirecting: %s -> %s", host, dialerUpstreamURL)
-			dialerPerHost.AddHost(host)
+			dialerUpstreamFiltered.AddHost(host)
 		}
 		for _, zone := range *filterZones {
 			log.Printf("Redirecting: *.%s -> %s", zone, dialerUpstreamURL)
-			dialerPerHost.AddZone(zone)
+			dialerUpstreamFiltered.AddZone(zone)
 		}
-		dialer = dialerPerHost
+		dialer = dialerUpstreamFiltered
 	} else {
 		dialer = dialerUpstream
 		log.Printf("Redirecting: * -> %s", dialerUpstreamURL)
+	}
+	if len(*excludeHostnames) > 0 || len(*excludeZones) > 0 {
+		dialerUpstreamExcluded := netproxy.NewPerHost(dialer, proxy.DialerDirect)
+		for _, host := range *excludeHostnames {
+			log.Printf("Excluding: %s -> %s", host, dialerUpstreamURL)
+			dialerUpstreamExcluded.AddHost(host)
+		}
+		for _, zone := range *excludeZones {
+			log.Printf("Excluding: *.%s -> %s", zone, dialerUpstreamURL)
+			dialerUpstreamExcluded.AddZone(zone)
+		}
+		dialer = dialerUpstreamExcluded
 	}
 
 	portMap, err := parsePortMap(*proxyMapPort, *proxyAddr)
