@@ -45,7 +45,7 @@ func TestE2EHTTPS() error {
 	originalIP := checkIP("https://api.ipify.org/?format=text")
 	fmt.Println("Original IP:", originalIP)
 
-	redirectRule := []string{"OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "443", "-j", "REDIRECT", "--to-ports", "8080"}
+	redirectRule := []string{"OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "443", "-j", "REDIRECT", "--to-ports", "8443"}
 	if err := ipTablesAppend(redirectRule...); err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func TestE2EHTTP() error {
 	originalIP := checkIP("http://api.ipify.org/?format=text")
 	fmt.Println("Original IP:", originalIP)
 
-	redirectRule := []string{"OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8080"}
+	redirectRule := []string{"OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-ports", "8443"}
 	if err := ipTablesAppend(redirectRule...); err != nil {
 		return err
 	}
