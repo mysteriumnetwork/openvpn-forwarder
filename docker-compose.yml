@@ -10,6 +10,8 @@ services:
       --proxy.upstream-url=http://superproxy.com:8080
       --proxy.user=
       --proxy.pass=
+      --filter.zones=api.ipify.org
+      --exclude.hostnames=ipify.org
     cap_add:
     - NET_ADMIN
     - NET_RAW
