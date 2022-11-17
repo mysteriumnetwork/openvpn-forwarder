@@ -2,7 +2,7 @@
 Forward OpenVPN traffic to Mysterium Network nodes
 
 ## Quickstart
-Build and run the service via `make build run`
+Build and run the service via `go run ci/mage.go build run`
 
 ## Redirect Openvpn's traffic (from the host machine)
 Let's assume:
