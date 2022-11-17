@@ -33,11 +33,21 @@ var (
 )
 
 // TestE2E runs end-to-end test
-func TestE2E() {
-	dockerCompose("up", "-d")
-	defer dockerCompose("down")
+func TestE2E() (err error) {
+	fmt.Println("Starting E2E containers")
+	if err = dockerCompose("up", "-d"); err != nil {
+		return err
+	}
+	defer func() {
+		fmt.Println("Forwarder logs:")
+		_ = runCompose("logs", "forwarder")
+		fmt.Println()
+
+		err = dockerCompose("down")
+	}()
 
 	mg.Deps(TestE2EHTTP, TestE2EHTTPS)
+	return nil
 }
 
 // TestE2EHTTPS runs end-to-end test for HTTPS traffic forwarding
@@ -89,4 +99,16 @@ func checkIP(apiURL string) string {
 	}
 
 	return ip
+}
+
+func runCompose(args ...string) error {
+	return sh.RunV(
+		"docker-compose",
+		append(
+			[]string{
+				"-f", "docker-compose.yml",
+			},
+			args...,
+		)...,
+	)
 }
