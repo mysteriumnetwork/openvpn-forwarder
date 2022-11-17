@@ -12,8 +12,15 @@ services:
       --proxy.pass=
       --filter.zones=api.ipify.org
       --exclude.hostnames=ipify.org
+    ports:
+    - "8443:8443"
+
+  machine:
+    build:
+      context: .
+      dockerfile: e2e/Dockerfile
+    volumes:
+      - .:/go/src/github.com/mysteriumnetwork/openvpn-forwarder
     cap_add:
     - NET_ADMIN
     - NET_RAW
-    ports:
-    - "8443:8443"
