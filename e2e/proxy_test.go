@@ -80,10 +80,37 @@ func TestHTTP(t *testing.T) {
 	assert.NotEqualf(t, originalIP, currentIP, "Request proxying failed: %s -> %s", originalIP, currentIP)
 }
 
+func TestHTTPWithCloseHeader(t *testing.T) {
+	// given
+	originalIP, err := checkIP("http://api.ipify.org/?format=text")
+	t.Log("Original IP:", originalIP)
+	assert.NoError(t, err)
+
+	forwarderIP, err := getForwarderIP()
+	assert.NoError(t, err)
+
+	// when
+	redirectRule := []string{"OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "80", "-j", "DNAT", "--to-destination", forwarderIP + ":8443"}
+	err = ipTablesAppend(redirectRule...)
+	defer ipTablesDelete(redirectRule...)
+	assert.NoError(t, err)
+
+	currentIP, err := sh.Output(
+		"curl", "-s",
+		"--http1.1",
+		"-H", "Connection: close",
+		"http://api.ipify.org/?format=text",
+	)
+	t.Log("Current IP:", currentIP)
+	assert.NoError(t, err)
+
+	assert.NotEqualf(t, originalIP, currentIP, "Request proxying failed: %s -> %s", originalIP, currentIP)
+}
+
 func getForwarderIP() (string, error) {
 	return sh.Output("dig", "forwarder", "+short")
 }
 
 func checkIP(apiURL string) (string, error) {
-	return sh.Output("wget", "-q", "-O", "-", apiURL)
+	return sh.Output("curl", "-s", apiURL)
 }

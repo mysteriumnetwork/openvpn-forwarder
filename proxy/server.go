@@ -18,12 +18,12 @@
 package proxy
 
 import (
+	"bufio"
 	"crypto/tls"
 	"io"
 	"log"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"strings"
 
@@ -94,8 +94,7 @@ func (s *proxyServer) handler(l net.Listener, f func(c net.Conn)) {
 }
 
 func (s *proxyServer) serveHTTP(c net.Conn) {
-	sc := httputil.NewServerConn(c, nil)
-	req, err := sc.Read()
+	req, err := http.ReadRequest(bufio.NewReader(c))
 	if err != nil {
 		log.Printf("Failed to read HTTP request: %v", err)
 		return
