@@ -1,4 +1,4 @@
-FROM golang:1.13-alpine AS builder
+FROM golang:1.18-alpine AS builder
 
 # Install packages
 RUN apk add --update --no-cache bash git gcc musl-dev make
@@ -8,7 +8,7 @@ WORKDIR /go/src/github.com/mysteriumnetwork/openvpn-forwarder
 ADD . .
 
 # Build application
-RUN make build -B
+RUN go run ci/mage.go build
 
 
 FROM alpine:3.9
