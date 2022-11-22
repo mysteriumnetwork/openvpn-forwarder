@@ -19,18 +19,20 @@ package main
 
 import (
 	"flag"
-	"log"
 	"net"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 
+	log "github.com/cihub/seelog"
 	"github.com/mysteriumnetwork/openvpn-forwarder/api"
 	"github.com/mysteriumnetwork/openvpn-forwarder/proxy"
 	"github.com/pkg/errors"
 	netproxy "golang.org/x/net/proxy"
 )
 
+var logLevel = flag.String("log.level", log.InfoStr, "Set the logging level (trace, debug, info, warn, error, critical)")
 var proxyAddr = flag.String("proxy.bind", ":8443", "Proxy address for incoming connections")
 var proxyAPIAddr = flag.String("proxy.api-bind", ":8000", "HTTP proxy API address")
 var proxyUpstreamURL = flag.String(
@@ -74,15 +76,18 @@ type domainTracker interface {
 
 func main() {
 	flag.Parse()
+	setLoggerFormat(*logLevel)
 
 	dialerUpstreamURL, err := url.Parse(*proxyUpstreamURL)
 	if err != nil {
-		log.Fatalf("Invalid upstream URL: %s", *proxyUpstreamURL)
+		_ = log.Criticalf("Invalid upstream URL: %s", *proxyUpstreamURL)
+		os.Exit(1)
 	}
 
 	sm, err := proxy.NewStickyMapper(*stickyStoragePath)
 	if err != nil {
-		log.Fatalf("Failed to create sticky mapper, %v", err)
+		_ = log.Criticalf("Failed to create sticky mapper, %v", err)
+		os.Exit(1)
 	}
 
 	var domainTracer domainTracker = proxy.NewNoopTracer()
@@ -99,26 +104,26 @@ func main() {
 	if len(*filterHostnames) > 0 || len(*filterZones) > 0 {
 		dialerUpstreamFiltered := netproxy.NewPerHost(proxy.DialerDirect, dialerUpstream)
 		for _, host := range *filterHostnames {
-			log.Printf("Redirecting: %s -> %s", host, dialerUpstreamURL)
+			log.Infof("Redirecting: %s -> %s", host, dialerUpstreamURL)
 			dialerUpstreamFiltered.AddHost(host)
 		}
 		for _, zone := range *filterZones {
-			log.Printf("Redirecting: *.%s -> %s", zone, dialerUpstreamURL)
+			log.Infof("Redirecting: *.%s -> %s", zone, dialerUpstreamURL)
 			dialerUpstreamFiltered.AddZone(zone)
 		}
 		dialer = dialerUpstreamFiltered
 	} else {
 		dialer = dialerUpstream
-		log.Printf("Redirecting: * -> %s", dialerUpstreamURL)
+		log.Infof("Redirecting: * -> %s", dialerUpstreamURL)
 	}
 	if len(*excludeHostnames) > 0 || len(*excludeZones) > 0 {
 		dialerUpstreamExcluded := netproxy.NewPerHost(dialer, proxy.DialerDirect)
 		for _, host := range *excludeHostnames {
-			log.Printf("Excluding: %s -> %s", host, dialerUpstreamURL)
+			log.Infof("Excluding: %s -> %s", host, dialerUpstreamURL)
 			dialerUpstreamExcluded.AddHost(host)
 		}
 		for _, zone := range *excludeZones {
-			log.Printf("Excluding: *.%s -> %s", zone, dialerUpstreamURL)
+			log.Infof("Excluding: *.%s -> %s", zone, dialerUpstreamURL)
 			dialerUpstreamExcluded.AddZone(zone)
 		}
 		dialer = dialerUpstreamExcluded
@@ -126,7 +131,8 @@ func main() {
 
 	portMap, err := parsePortMap(*proxyMapPort, *proxyAddr)
 	if err != nil {
-		log.Fatal(err)
+		_ = log.Criticalf("Failed to parse port map: %v", err)
+		os.Exit(1)
 	}
 	proxyServer := proxy.NewServer(dialer, dialerUpstreamURL, sm, domainTracer, portMap)
 
@@ -134,15 +140,23 @@ func main() {
 	for p := range portMap {
 		wg.Add(1)
 		go func(p string) {
-			log.Print("Serving HTTPS proxy on :", p)
+			log.Infof("Serving HTTPS proxy on %s", p)
 			if err := proxyServer.ListenAndServe(":" + p); err != nil {
-				log.Fatalf("Failed to listen http requests: %v", err)
+				_ = log.Criticalf("Failed to listen http requests: %v", err)
+				os.Exit(1)
 			}
 			wg.Done()
 		}(p)
 	}
 
 	wg.Wait()
+}
+
+func setLoggerFormat(levelStr string) {
+	level, _ := log.LogLevelFromString(levelStr)
+	writer, _ := log.NewConsoleWriter()
+	logger, _ := log.LoggerFromWriterWithMinLevelAndFormat(writer, level, "%Date %Time [%LEVEL] %Msg%n")
+	log.ReplaceLogger(logger)
 }
 
 func parsePortMap(ports flagArray, proxyAddr string) (map[string]string, error) {

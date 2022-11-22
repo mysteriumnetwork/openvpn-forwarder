@@ -21,12 +21,12 @@ import (
 	"bufio"
 	"crypto/tls"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 
+	log "github.com/cihub/seelog"
 	"github.com/inconshreveable/go-vhost"
 	"github.com/pkg/errors"
 	"github.com/soheilhy/cmux"
@@ -83,7 +83,7 @@ func (s *proxyServer) handler(l net.Listener, f func(c net.Conn)) {
 	for {
 		c, err := l.Accept()
 		if err != nil {
-			log.Printf("Error accepting new connection - %v", err)
+			_ = log.Errorf("Error accepting new connection - %v", err)
 			continue
 		}
 		go func() {
@@ -96,14 +96,14 @@ func (s *proxyServer) handler(l net.Listener, f func(c net.Conn)) {
 func (s *proxyServer) serveHTTP(c net.Conn) {
 	req, err := http.ReadRequest(bufio.NewReader(c))
 	if err != nil {
-		log.Printf("Failed to read HTTP request: %v", err)
+		_ = log.Errorf("Failed to read HTTP request: %v", err)
 		return
 	}
 
 	remoteHost := s.authorityAddr("http", req.Host)
 	conn, err := s.connectTo(c, remoteHost)
 	if err != nil {
-		log.Printf("Error establishing connection to %s: %v", remoteHost, err)
+		_ = log.Errorf("Error establishing connection to %s: %v", remoteHost, err)
 		return
 	}
 	defer conn.Close()
@@ -111,7 +111,7 @@ func (s *proxyServer) serveHTTP(c net.Conn) {
 	if req.Method == http.MethodConnect {
 		c.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
 	} else if err := req.Write(conn); err != nil {
-		log.Printf("Failed to forward HTTP request to %s: %v", remoteHost, err)
+		_ = log.Errorf("Failed to forward HTTP request to %s: %v", remoteHost, err)
 		return
 	}
 
@@ -140,32 +140,32 @@ func (s *proxyServer) serveTLS(c net.Conn) {
 		// For some malformed TLS connection vhost.TLS could panic.
 		// We don't care about a single failed request, service should keep working.
 		if r := recover(); r != nil {
-			log.Println("Recovered panic in serveTLS", r)
+			_ = log.Error("Recovered panic in serveTLS", r)
 		}
 	}()
 
 	tlsConn, err := vhost.TLS(c)
 	if err != nil {
-		log.Printf("Error accepting new connection - %v", err)
+		_ = log.Errorf("Error accepting new connection - %v", err)
 		return
 	}
 	defer tlsConn.Close()
 
 	if tlsConn.Host() == "" {
-		log.Printf("Cannot support non-SNI enabled TLS sessions")
+		_ = log.Error("Cannot support non-SNI enabled TLS sessions")
 		return
 	}
 
 	_, port, err := net.SplitHostPort(tlsConn.LocalAddr().String())
 	if err != nil {
-		log.Printf("Cannot parse local address")
+		_ = log.Error("Cannot parse local address")
 		return
 	}
 
 	remoteHost := s.authorityAddr("https", tlsConn.Host()+":"+port)
 	conn, err := s.connectTo(c, remoteHost)
 	if err != nil {
-		log.Printf("Error establishing connection to %s: %v", remoteHost, err)
+		_ = log.Errorf("Error establishing connection to %s: %v", remoteHost, err)
 		return
 	}
 	defer conn.Close()

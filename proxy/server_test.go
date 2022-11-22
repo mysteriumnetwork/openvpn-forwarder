@@ -19,7 +19,6 @@ package proxy
 
 import (
 	"bufio"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -27,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	log "github.com/cihub/seelog"
 	"github.com/soheilhy/cmux"
 	"github.com/stretchr/testify/assert"
 )
@@ -82,7 +82,7 @@ func Test_Server_AuthHeaderAdded(t *testing.T) {
 func listenAndServe(s *proxyServer) string {
 	ln, err := net.Listen("tcp", ":0")
 	if err != nil {
-		log.Fatalf("Error listening for https connections - %v", err)
+		log.Criticalf("Error listening for https connections - %v", err)
 	}
 
 	m := cmux.New(ln)
