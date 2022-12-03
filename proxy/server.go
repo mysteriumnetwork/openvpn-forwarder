@@ -20,11 +20,15 @@ package proxy
 import (
 	"bufio"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
+	"syscall"
+	"unsafe"
 
 	log "github.com/cihub/seelog"
 	"github.com/inconshreveable/go-vhost"
@@ -81,15 +85,31 @@ func (s *proxyServer) ListenAndServe(addr string) error {
 
 func (s *proxyServer) handler(l net.Listener, f func(c *Context)) {
 	for {
-		conn, err := l.Accept()
+		var c Context
+		var err error
+
+		c.conn, err = l.Accept()
+		connMux, ok := c.conn.(*cmux.MuxConn)
+		if !ok {
+			err = fmt.Errorf("unsupported connection: %T", c.conn)
+		}
+		connTCP, ok := connMux.Conn.(*net.TCPConn)
+		if !ok {
+			err = fmt.Errorf("non-TCP connection: %T", connMux.Conn)
+		}
 		if err != nil {
-			_ = log.Errorf("Error accepting new connection - %v", err)
+			_ = log.Errorf("Error accepting new connection. %v", err)
 			continue
 		}
 
+		c.connOriginalDst, err = getOriginalDst(connTCP)
+		if err != nil {
+			_ = log.Errorf("Error recovering original destination address. %v", err)
+		}
+
 		go func() {
-			f(&Context{conn: conn})
-			conn.Close()
+			f(&c)
+			c.conn.Close()
 		}()
 	}
 }
@@ -150,7 +170,7 @@ func (s *proxyServer) serveTLS(c *Context) {
 
 	tlsConn, err := vhost.TLS(c.conn)
 	if err != nil {
-		_ = log.Errorf("Error accepting new connection - %v", err)
+		_ = log.Errorf("Error accepting new TLS connection - %v", err)
 		return
 	}
 	defer tlsConn.Close()
@@ -211,12 +231,73 @@ func (s *proxyServer) connectTo(c net.Conn, remoteHost string) (conn io.ReadWrit
 	return conn, nil
 }
 
+const SO_ORIGINAL_DST = 0x50
+
+// getOriginalDst retrieves the original destination address from
+// NATed connection.  Currently, only Linux iptables using DNAT/REDIRECT
+// is supported.  For other operating systems, this will just return
+// conn.LocalAddr().
+//
+// Note that this function only works when nf_conntrack_ipv4 and/or
+// nf_conntrack_ipv6 is loaded in the kernel.
+func getOriginalDst(conn *net.TCPConn) (*net.TCPAddr, error) {
+	f, err := conn.File()
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	fd := int(f.Fd())
+	// revert to non-blocking mode.
+	// see http://stackoverflow.com/a/28968431/1493661
+	if err = syscall.SetNonblock(fd, true); err != nil {
+		return nil, os.NewSyscallError("setnonblock", err)
+	}
+
+	// IPv4
+	var addr syscall.RawSockaddrInet4
+	var len uint32
+	len = uint32(unsafe.Sizeof(addr))
+	err = getSockOpt(fd, syscall.IPPROTO_IP, SO_ORIGINAL_DST, unsafe.Pointer(&addr), &len)
+	if err != nil {
+		return nil, os.NewSyscallError("getSockOpt", err)
+	}
+
+	ip := make([]byte, 4)
+	for i, b := range addr.Addr {
+		ip[i] = b
+	}
+	pb := *(*[2]byte)(unsafe.Pointer(&addr.Port))
+
+	return &net.TCPAddr{
+		IP:   ip,
+		Port: int(pb[0])*256 + int(pb[1]),
+	}, nil
+}
+
+func getSockOpt(s int, level int, optname int, optval unsafe.Pointer, optlen *uint32) (err error) {
+	_, _, e := syscall.Syscall6(
+		syscall.SYS_GETSOCKOPT,
+		uintptr(s),
+		uintptr(level),
+		uintptr(optname),
+		uintptr(optval),
+		uintptr(unsafe.Pointer(optlen)),
+		0,
+	)
+	if e != 0 {
+		return e
+	}
+	return
+}
+
 func (s *proxyServer) accessLog(message string, c *Context) {
 	log.Tracef(
-		"%s [client_addr=%s, dest_addr=%s, destination_host=%s, destination_addr=%s]",
+		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
 		message,
 		c.conn.RemoteAddr().String(),
 		c.conn.LocalAddr().String(),
+		c.connOriginalDst,
 		c.destinationHost,
 		c.destinationAddress,
 	)
