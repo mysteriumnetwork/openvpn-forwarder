@@ -175,19 +175,24 @@ func (s *proxyServer) serveTLS(c *Context) {
 	}
 	defer tlsConn.Close()
 
-	if tlsConn.Host() == "" {
+	if tlsConn.Host() != "" {
+		_, port, err := net.SplitHostPort(tlsConn.LocalAddr().String())
+		if err != nil {
+			s.logError("Cannot parse local address", c)
+			return
+		}
+
+		c.destinationHost = tlsConn.Host() + ":" + port
+		c.destinationAddress = s.authorityAddr("https", c.destinationHost)
+	} else if c.connOriginalDst != nil {
+		s.logWarn("Cannon parse SNI in TLS request", c)
+
+		c.destinationHost = ""
+		c.destinationAddress = c.connOriginalDst.String()
+	} else {
 		s.logError("Cannot support non-SNI enabled TLS sessions", c)
 		return
 	}
-
-	_, port, err := net.SplitHostPort(tlsConn.LocalAddr().String())
-	if err != nil {
-		s.logError("Cannot parse local address", c)
-		return
-	}
-
-	c.destinationHost = tlsConn.Host() + ":" + port
-	c.destinationAddress = s.authorityAddr("https", c.destinationHost)
 	s.logAccess("HTTPS request", c)
 
 	conn, err := s.connectTo(c.conn, c.destinationAddress)
@@ -305,6 +310,18 @@ func (s *proxyServer) logAccess(message string, c *Context) {
 
 func (s *proxyServer) logError(message string, c *Context) {
 	_ = log.Errorf(
+		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
+		message,
+		c.conn.RemoteAddr().String(),
+		c.conn.LocalAddr().String(),
+		c.connOriginalDst,
+		c.destinationHost,
+		c.destinationAddress,
+	)
+}
+
+func (s *proxyServer) logWarn(message string, c *Context) {
+	_ = log.Warnf(
 		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
 		message,
 		c.conn.RemoteAddr().String(),
