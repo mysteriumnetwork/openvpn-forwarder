@@ -6,6 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     command: >
+      --log.level=trace
       --proxy.bind=:8443
       --proxy.upstream-url=http://superproxy.com:8080
       --proxy.user=

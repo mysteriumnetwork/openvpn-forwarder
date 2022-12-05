@@ -21,12 +21,12 @@ import (
 	"bufio"
 	"crypto/tls"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 
+	log "github.com/cihub/seelog"
 	"github.com/inconshreveable/go-vhost"
 	"github.com/pkg/errors"
 	"github.com/soheilhy/cmux"
@@ -79,44 +79,48 @@ func (s *proxyServer) ListenAndServe(addr string) error {
 	return m.Serve()
 }
 
-func (s *proxyServer) handler(l net.Listener, f func(c net.Conn)) {
+func (s *proxyServer) handler(l net.Listener, f func(c *Context)) {
 	for {
-		c, err := l.Accept()
+		conn, err := l.Accept()
 		if err != nil {
-			log.Printf("Error accepting new connection - %v", err)
+			_ = log.Errorf("Error accepting new connection - %v", err)
 			continue
 		}
+
 		go func() {
-			f(c)
-			c.Close()
+			f(&Context{conn: conn})
+			conn.Close()
 		}()
 	}
 }
 
-func (s *proxyServer) serveHTTP(c net.Conn) {
-	req, err := http.ReadRequest(bufio.NewReader(c))
+func (s *proxyServer) serveHTTP(c *Context) {
+	req, err := http.ReadRequest(bufio.NewReader(c.conn))
 	if err != nil {
-		log.Printf("Failed to read HTTP request: %v", err)
+		_ = log.Errorf("Failed to read HTTP request: %v", err)
 		return
 	}
 
-	remoteHost := s.authorityAddr("http", req.Host)
-	conn, err := s.connectTo(c, remoteHost)
+	c.destinationHost = req.Host
+	c.destinationAddress = s.authorityAddr("http", c.destinationHost)
+	s.accessLog("HTTP request", c)
+
+	conn, err := s.connectTo(c.conn, c.destinationAddress)
 	if err != nil {
-		log.Printf("Error establishing connection to %s: %v", remoteHost, err)
+		_ = log.Errorf("Error establishing connection to %s: %v", c.destinationAddress, err)
 		return
 	}
 	defer conn.Close()
 
 	if req.Method == http.MethodConnect {
-		c.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
+		c.conn.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
 	} else if err := req.Write(conn); err != nil {
-		log.Printf("Failed to forward HTTP request to %s: %v", remoteHost, err)
+		_ = log.Errorf("Failed to forward HTTP request to %s: %v", c.destinationAddress, err)
 		return
 	}
 
-	go io.Copy(conn, c)
-	io.Copy(c, conn)
+	go io.Copy(conn, c.conn)
+	io.Copy(c.conn, conn)
 }
 
 func (s *proxyServer) authorityAddr(scheme, authority string) string {
@@ -135,37 +139,40 @@ func (s *proxyServer) authorityAddr(scheme, authority string) string {
 	return net.JoinHostPort(host, port)
 }
 
-func (s *proxyServer) serveTLS(c net.Conn) {
+func (s *proxyServer) serveTLS(c *Context) {
 	defer func() {
 		// For some malformed TLS connection vhost.TLS could panic.
 		// We don't care about a single failed request, service should keep working.
 		if r := recover(); r != nil {
-			log.Println("Recovered panic in serveTLS", r)
+			_ = log.Error("Recovered panic in serveTLS", r)
 		}
 	}()
 
-	tlsConn, err := vhost.TLS(c)
+	tlsConn, err := vhost.TLS(c.conn)
 	if err != nil {
-		log.Printf("Error accepting new connection - %v", err)
+		_ = log.Errorf("Error accepting new connection - %v", err)
 		return
 	}
 	defer tlsConn.Close()
 
 	if tlsConn.Host() == "" {
-		log.Printf("Cannot support non-SNI enabled TLS sessions")
+		_ = log.Error("Cannot support non-SNI enabled TLS sessions")
 		return
 	}
 
 	_, port, err := net.SplitHostPort(tlsConn.LocalAddr().String())
 	if err != nil {
-		log.Printf("Cannot parse local address")
+		_ = log.Error("Cannot parse local address")
 		return
 	}
 
-	remoteHost := s.authorityAddr("https", tlsConn.Host()+":"+port)
-	conn, err := s.connectTo(c, remoteHost)
+	c.destinationHost = tlsConn.Host() + ":" + port
+	c.destinationAddress = s.authorityAddr("https", c.destinationHost)
+	s.accessLog("HTTPS request", c)
+
+	conn, err := s.connectTo(c.conn, c.destinationAddress)
 	if err != nil {
-		log.Printf("Error establishing connection to %s: %v", remoteHost, err)
+		_ = log.Errorf("Error establishing connection to %s: %v", c.destinationAddress, err)
 		return
 	}
 	defer conn.Close()
@@ -202,4 +209,15 @@ func (s *proxyServer) connectTo(c net.Conn, remoteHost string) (conn io.ReadWrit
 	}
 
 	return conn, nil
+}
+
+func (s *proxyServer) accessLog(message string, c *Context) {
+	log.Tracef(
+		"%s [client_addr=%s, dest_addr=%s, destination_host=%s, destination_addr=%s]",
+		message,
+		c.conn.RemoteAddr().String(),
+		c.conn.LocalAddr().String(),
+		c.destinationHost,
+		c.destinationAddress,
+	)
 }

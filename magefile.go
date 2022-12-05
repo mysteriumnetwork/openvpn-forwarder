@@ -1,3 +1,4 @@
+//go:build mage
 // +build mage
 
 /*
@@ -38,6 +39,7 @@ func Build() error {
 // Run the application
 func Run() error {
 	return sh.RunV(buildPath,
+		"--log.level=trace",
 		"--proxy.bind=:8443",
 		"--proxy.upstream-url=http://superproxy.com:8080",
 		"--proxy.user=",
