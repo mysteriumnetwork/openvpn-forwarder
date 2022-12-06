@@ -12,14 +12,14 @@ Let's assume:
 1. Run forwarder as a Docker container:
 ```bash
 docker run -d --restart=always --name forwarder --network host --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
-    --proxy.bind=127.0.0.1:8443 \
+    --proxy.bind=0.0.0.0:8443 \
     --proxy.upstream-url="https://superproxy.com:443" \
     --filter.hostnames="ipinfo.io"
 ```
 
 2. Redirect HTTP ports to forwarder:
 ```bash
-iptables -t nat -A PREROUTING -p tcp -m multiport --dports 80,443 -j DNAT --to-destination 127.0.0.1:8443
+iptables -t nat -A PREROUTING -p tcp -m multiport --dports 80,443 -j REDIRECT --to-ports 8443
 ```
 
 3. Forwarder redirects HTTP traffic to upstream HTTPS proxy (this case just hostname 'ipinfo.io'):
@@ -150,7 +150,7 @@ If you need to forward non standard port too, the following steps required:
 1. Start OpenVPN forwarder with the `--proxy.port-map` flag:
 ```bash
 docker run -d --restart=always --name forwarder --network host --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
-    --proxy.bind=127.0.0.1:8443 \
+    --proxy.bind=0.0.0.0:8443 \
     --proxy.upstream-url="https://superproxy.com:443" \
     --proxy.port-map=18443:8443,1234:1234
 ```
