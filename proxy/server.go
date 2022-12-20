@@ -98,18 +98,22 @@ func (s *proxyServer) handler(l net.Listener, f func(c *Context)) {
 			err = fmt.Errorf("non-TCP connection: %T", connMux.Conn)
 		}
 		if err != nil {
-			_ = log.Errorf("Error accepting new connection. %v", err)
+			s.logError(fmt.Sprintf("Error accepting new connection. %v", err), &c)
 			continue
 		}
 
 		c.connOriginalDst, err = getOriginalDst(connTCP)
-		if err != nil {
-			_ = log.Errorf("Error recovering original destination address. %v", err)
+		if c.connOriginalDst.String() == c.conn.LocalAddr().String() {
+			c.connOriginalDst = nil
 		}
 
 		go func() {
 			f(&c)
 			c.conn.Close()
+
+			if c.connOriginalDst == nil {
+				s.logWarn("Failure recovering original destination address. Are you redirecting from same host network?", &c)
+			}
 		}()
 	}
 }
@@ -117,7 +121,7 @@ func (s *proxyServer) handler(l net.Listener, f func(c *Context)) {
 func (s *proxyServer) serveHTTP(c *Context) {
 	req, err := http.ReadRequest(bufio.NewReader(c.conn))
 	if err != nil {
-		_ = log.Errorf("Failed to accept new HTTP request: %v", err)
+		s.logAccess(fmt.Sprintf("Failed to accept new HTTP request: %v", err), c)
 		return
 	}
 
@@ -185,10 +189,9 @@ func (s *proxyServer) serveTLS(c *Context) {
 		c.destinationHost = tlsConn.Host() + ":" + port
 		c.destinationAddress = s.authorityAddr("https", c.destinationHost)
 	} else if c.connOriginalDst != nil {
-		s.logWarn("Cannon parse SNI in TLS request", c)
-
 		c.destinationHost = ""
 		c.destinationAddress = c.connOriginalDst.String()
+		s.logWarn("Cannon parse SNI in TLS request", c)
 	} else {
 		s.logError("Cannot support non-SNI enabled TLS sessions", c)
 		return
@@ -302,7 +305,7 @@ func (s *proxyServer) logAccess(message string, c *Context) {
 		message,
 		c.conn.RemoteAddr().String(),
 		c.conn.LocalAddr().String(),
-		c.connOriginalDst,
+		c.connOriginalDst.String(),
 		c.destinationHost,
 		c.destinationAddress,
 	)
@@ -314,7 +317,7 @@ func (s *proxyServer) logError(message string, c *Context) {
 		message,
 		c.conn.RemoteAddr().String(),
 		c.conn.LocalAddr().String(),
-		c.connOriginalDst,
+		c.connOriginalDst.String(),
 		c.destinationHost,
 		c.destinationAddress,
 	)
@@ -326,7 +329,7 @@ func (s *proxyServer) logWarn(message string, c *Context) {
 		message,
 		c.conn.RemoteAddr().String(),
 		c.conn.LocalAddr().String(),
-		c.connOriginalDst,
+		c.connOriginalDst.String(),
 		c.destinationHost,
 		c.destinationAddress,
 	)
