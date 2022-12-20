@@ -42,11 +42,13 @@ type domainTracker interface {
 }
 
 type proxyServer struct {
-	dialer   netproxy.Dialer
-	sm       StickyMapper
-	dt       domainTracker
-	upstream *url.URL
-	portMap  map[string]string
+	allowedSubnets []*net.IPNet
+	allowedIPs     []net.IP
+	dialer         netproxy.Dialer
+	sm             StickyMapper
+	dt             domainTracker
+	upstream       *url.URL
+	portMap        map[string]string
 }
 
 // StickyMapper represent connection stickiness storage.
@@ -56,13 +58,23 @@ type StickyMapper interface {
 }
 
 // NewServer returns new instance of HTTP transparent proxy server
-func NewServer(upstreamDialer netproxy.Dialer, upstreamHost *url.URL, mapper StickyMapper, dt domainTracker, portMap map[string]string) *proxyServer {
+func NewServer(
+	allowedSubnets []*net.IPNet,
+	allowedIPs []net.IP,
+	upstreamDialer netproxy.Dialer,
+	upstreamHost *url.URL,
+	mapper StickyMapper,
+	dt domainTracker,
+	portMap map[string]string,
+) *proxyServer {
 	return &proxyServer{
-		dialer:   upstreamDialer,
-		sm:       mapper,
-		dt:       dt,
-		upstream: upstreamHost,
-		portMap:  portMap,
+		allowedSubnets: allowedSubnets,
+		allowedIPs:     allowedIPs,
+		dialer:         upstreamDialer,
+		sm:             mapper,
+		dt:             dt,
+		upstream:       upstreamHost,
+		portMap:        portMap,
 	}
 }
 
@@ -97,8 +109,31 @@ func (s *proxyServer) handler(l net.Listener, f func(c *Context)) {
 		if !ok {
 			err = fmt.Errorf("non-TCP connection: %T", connMux.Conn)
 		}
+		clientAddr, ok := connTCP.RemoteAddr().(*net.TCPAddr)
+		if !ok {
+			err = fmt.Errorf("non-TCP address: %T", connTCP.RemoteAddr())
+			continue
+		}
 		if err != nil {
 			s.logError(fmt.Sprintf("Error accepting new connection. %v", err), &c)
+			continue
+		}
+
+		clientAddrAllowed := false
+		for _, subnet := range s.allowedSubnets {
+			if subnet.Contains(clientAddr.IP) {
+				clientAddrAllowed = true
+				break
+			}
+		}
+		for _, ip := range s.allowedIPs {
+			if ip.Equal(clientAddr.IP) {
+				clientAddrAllowed = true
+				break
+			}
+		}
+		if !clientAddrAllowed {
+			s.logWarn(fmt.Sprintf("Access restricted from address %s", clientAddr.IP.String()), &c)
 			continue
 		}
 

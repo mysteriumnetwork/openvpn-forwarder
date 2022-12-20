@@ -13,6 +13,7 @@ Let's assume:
 ```bash
 docker run -d --restart=always --name forwarder --network host --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
     --proxy.bind=0.0.0.0:8443 \
+    --proxy.allow=0.0.0.0/0 \
     --proxy.upstream-url="https://superproxy.com:443" \
     --filter.hostnames="ipinfo.io"
 ```
@@ -151,6 +152,7 @@ If you need to forward non standard port too, the following steps required:
 ```bash
 docker run -d --restart=always --name forwarder --network host --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
     --proxy.bind=0.0.0.0:8443 \
+    --proxy.allow=0.0.0.0/0 \
     --proxy.upstream-url="https://superproxy.com:443" \
     --proxy.port-map=18443:8443,1234:1234
 ```
