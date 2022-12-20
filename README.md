@@ -14,8 +14,10 @@ Let's assume:
 docker run -d --restart=always --name forwarder --network host --cap-add NET_ADMIN mysteriumnetwork/openvpn-forwarder \
     --proxy.bind=0.0.0.0:8443 \
     --proxy.allow=0.0.0.0/0 \
-    --proxy.upstream-url="https://superproxy.com:443" \
-    --filter.hostnames="ipinfo.io"
+    --proxy.upstream-url="https://superproxy1.com:8443" \
+    --filter.hostnames="ipinfo.io" \
+    --proxy.upstream-url="http://superproxy2.com:8080" \
+    --filter.zones="ipify.org"
 ```
 
 2. Redirect HTTP ports to forwarder:

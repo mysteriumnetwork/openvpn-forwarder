@@ -19,6 +19,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"net"
 	"net/url"
 	"os"
@@ -36,38 +37,12 @@ var logLevel = flag.String("log.level", log.InfoStr, "Set the logging level (tra
 var proxyAddr = flag.String("proxy.bind", ":8443", "Proxy address for incoming connections")
 var proxyAllow = FlagArray("proxy.allow", `Proxy allows connection from these addresses only (separated by comma - "10.13.0.1,10.13.0.0/16")`)
 var proxyAPIAddr = flag.String("proxy.api-bind", ":8000", "HTTP proxy API address")
-var proxyUpstreamURL = flag.String(
-	"proxy.upstream-url",
-	"",
-	`Upstream HTTPS proxy where to forward traffic (e.g. "http://superproxy.com:8080")`,
-)
-var proxyUser = flag.String("proxy.user", "", "HTTP proxy auth user")
-var proxyPass = flag.String("proxy.pass", "", "HTTP proxy auth password")
-var proxyCountry = flag.String("proxy.country", "", "HTTP proxy country targeting")
+var upstreamConfigs = FlagUpstreamConfig()
 var proxyMapPort = FlagArray(
 	"proxy.port-map",
 	`Explicitly map source port to destination port (separated by comma - "8443:443,18443:8443")`,
 )
-
 var stickyStoragePath = flag.String("stickiness-db-path", proxy.MemoryStorage, "Path to the database for stickiness mapping")
-
-var filterHostnames = FlagArray(
-	"filter.hostnames",
-	`Explicitly forward just several hostnames (separated by comma - "ipinfo.io,ipify.org")`,
-)
-var filterZones = FlagArray(
-	"filter.zones",
-	`Explicitly forward just several DNS zones. A zone of "example.com" matches "example.com" and all of its subdomains. (separated by comma - "ipinfo.io,ipify.org")`,
-)
-var excludeHostnames = FlagArray(
-	"exclude.hostnames",
-	`Exclude from forwarding several hostnames (separated by comma - "ipinfo.io,ipify.org")`,
-)
-var excludeZones = FlagArray(
-	"exclude.zones",
-	`Exclude from forwarding several DNS zones. A zone of "example.com" matches "example.com" and all of its subdomains. (separated by comma - "ipinfo.io,ipify.org")`,
-)
-
 var enableDomainTracer = flag.Bool("enable-domain-tracer", false, "Enable tracing domain names from requests")
 
 type domainTracker interface {
@@ -78,12 +53,6 @@ type domainTracker interface {
 func main() {
 	flag.Parse()
 	setLoggerFormat(*logLevel)
-
-	dialerUpstreamURL, err := url.Parse(*proxyUpstreamURL)
-	if err != nil {
-		_ = log.Criticalf("Invalid upstream URL: %s", *proxyUpstreamURL)
-		os.Exit(1)
-	}
 
 	sm, err := proxy.NewStickyMapper(*stickyStoragePath)
 	if err != nil {
@@ -99,35 +68,41 @@ func main() {
 	apiServer := api.NewServer(*proxyAPIAddr, sm, domainTracer)
 	go apiServer.ListenAndServe()
 
-	dialerUpstream := proxy.NewDialerHTTPConnect(proxy.DialerDirect, dialerUpstreamURL, *proxyUser, *proxyPass, *proxyCountry)
-
 	var dialer netproxy.Dialer
-	if len(*filterHostnames) > 0 || len(*filterZones) > 0 {
-		dialerUpstreamFiltered := netproxy.NewPerHost(proxy.DialerDirect, dialerUpstream)
-		for _, host := range *filterHostnames {
-			log.Infof("Redirecting: %s -> %s", host, dialerUpstreamURL)
-			dialerUpstreamFiltered.AddHost(host)
+	for _, upstreamConfig := range upstreamConfigs.configs {
+		var dialerDefault netproxy.Dialer = proxy.DialerDirect
+		if dialer != nil {
+			dialerDefault = dialer
 		}
-		for _, zone := range *filterZones {
-			log.Infof("Redirecting: *.%s -> %s", zone, dialerUpstreamURL)
-			dialerUpstreamFiltered.AddZone(zone)
+		dialerUpstream := proxy.NewDialerHTTPConnect(proxy.DialerDirect, upstreamConfig.url, upstreamConfig.user, upstreamConfig.password, upstreamConfig.country)
+
+		if len(upstreamConfig.filterHostnames) > 0 || len(upstreamConfig.filterZones) > 0 {
+			dialerUpstreamFiltered := netproxy.NewPerHost(dialerDefault, dialerUpstream)
+			for _, host := range upstreamConfig.filterHostnames {
+				log.Infof("Redirecting: %s -> %s", host, upstreamConfig.url)
+				dialerUpstreamFiltered.AddHost(host)
+			}
+			for _, zone := range upstreamConfig.filterZones {
+				log.Infof("Redirecting: *.%s -> %s", zone, upstreamConfig.url)
+				dialerUpstreamFiltered.AddZone(zone)
+			}
+			dialer = dialerUpstreamFiltered
+		} else {
+			dialer = dialerUpstream
+			log.Infof("Redirecting: * -> %s", upstreamConfig.url)
 		}
-		dialer = dialerUpstreamFiltered
-	} else {
-		dialer = dialerUpstream
-		log.Infof("Redirecting: * -> %s", dialerUpstreamURL)
-	}
-	if len(*excludeHostnames) > 0 || len(*excludeZones) > 0 {
-		dialerUpstreamExcluded := netproxy.NewPerHost(dialer, proxy.DialerDirect)
-		for _, host := range *excludeHostnames {
-			log.Infof("Excluding: %s -> %s", host, dialerUpstreamURL)
-			dialerUpstreamExcluded.AddHost(host)
+		if len(upstreamConfig.excludeHostnames) > 0 || len(upstreamConfig.excludeZones) > 0 {
+			dialerUpstreamExcluded := netproxy.NewPerHost(dialer, dialerDefault)
+			for _, host := range upstreamConfig.excludeHostnames {
+				log.Infof("Excluding: %s -> %s", host, upstreamConfig.url)
+				dialerUpstreamExcluded.AddHost(host)
+			}
+			for _, zone := range upstreamConfig.excludeZones {
+				log.Infof("Excluding: *.%s -> %s", zone, upstreamConfig.url)
+				dialerUpstreamExcluded.AddZone(zone)
+			}
+			dialer = dialerUpstreamExcluded
 		}
-		for _, zone := range *excludeZones {
-			log.Infof("Excluding: *.%s -> %s", zone, dialerUpstreamURL)
-			dialerUpstreamExcluded.AddZone(zone)
-		}
-		dialer = dialerUpstreamExcluded
 	}
 
 	allowedSubnets, allowedIPs, err := parseAllowedAddresses(*proxyAllow)
@@ -217,4 +192,113 @@ func (flag *flagArray) Set(s string) error {
 		return c == ','
 	})
 	return nil
+}
+
+type flagUpstreamConfig struct {
+	url              *url.URL
+	user             string
+	password         string
+	country          string
+	filterHostnames  flagArray
+	filterZones      flagArray
+	excludeHostnames flagArray
+	excludeZones     flagArray
+}
+
+// FlagUpstreamConfig defines list of configure upstream proxies.
+func FlagUpstreamConfig() *flagUpstreamConfigs {
+	fuc := &flagUpstreamConfigs{
+		configs: []flagUpstreamConfig{
+			{},
+		},
+		configCurrent: 0,
+	}
+	flag.Func(
+		"proxy.upstream-url",
+		`Upstream HTTPS proxy where to forward traffic (e.g. "http://superproxy.com:8080")`,
+		fuc.parseUpstreamUrl,
+	)
+	flag.Func("proxy.user", "HTTPS proxy auth user", fuc.parseUpstreamUser)
+	flag.Func("proxy.pass", "HTTP proxy auth password", fuc.parseUpstreamPass)
+	flag.Func("proxy.country", "HTTP proxy country targeting", fuc.parseUpstreamCountry)
+	flag.Func(
+		"filter.hostnames",
+		`Explicitly forward just several hostnames (separated by comma - "ipinfo.io,ipify.org")`,
+		fuc.parseFilterHostnames,
+	)
+	flag.Func(
+		"filter.zones",
+		`Explicitly forward just several DNS zones. A zone of "example.com" matches "example.com" and all of its subdomains. (separated by comma - "ipinfo.io,ipify.org")`,
+		fuc.parseFilterZones,
+	)
+	flag.Func(
+		"exclude.hostnames",
+		`Exclude from forwarding several hostnames (separated by comma - "ipinfo.io,ipify.org")`,
+		fuc.parseExcludeHostnames,
+	)
+	flag.Func(
+		"exclude.zones",
+		`Exclude from forwarding several DNS zones. A zone of "example.com" matches "example.com" and all of its subdomains. (separated by comma - "ipinfo.io,ipify.org")`,
+		fuc.parseExcludeZones,
+	)
+
+	return fuc
+}
+
+type flagUpstreamConfigs struct {
+	configs       []flagUpstreamConfig
+	configCurrent int
+}
+
+func (fuc *flagUpstreamConfigs) current() *flagUpstreamConfig {
+	return &fuc.configs[fuc.configCurrent]
+}
+
+func (fuc *flagUpstreamConfigs) increment() {
+	fuc.configs = append(fuc.configs, flagUpstreamConfig{})
+	fuc.configCurrent++
+}
+
+func (fuc *flagUpstreamConfigs) parseUpstreamUrl(s string) error {
+	upstreamUrl, err := url.Parse(s)
+	if err != nil {
+		return fmt.Errorf("invalid upstream URL: %s. %v", s, err)
+	}
+
+	if fuc.configs[fuc.configCurrent].url != nil {
+		fuc.increment()
+	}
+	fuc.configs[fuc.configCurrent].url = upstreamUrl
+	return nil
+}
+
+func (fuc *flagUpstreamConfigs) parseUpstreamUser(s string) error {
+	fuc.configs[fuc.configCurrent].user = s
+	return nil
+}
+
+func (fuc *flagUpstreamConfigs) parseUpstreamPass(s string) error {
+	fuc.configs[fuc.configCurrent].password = s
+	return nil
+}
+
+func (fuc *flagUpstreamConfigs) parseUpstreamCountry(s string) error {
+	fuc.configs[fuc.configCurrent].country = s
+	return nil
+}
+
+func (fuc *flagUpstreamConfigs) parseFilterHostnames(s string) error {
+	return fuc.configs[fuc.configCurrent].filterHostnames.Set(s)
+}
+
+func (fuc *flagUpstreamConfigs) parseFilterZones(s string) error {
+	return fuc.configs[fuc.configCurrent].filterZones.Set(s)
+}
+
+func (fuc *flagUpstreamConfigs) parseExcludeHostnames(s string) error {
+	return fuc.configs[fuc.configCurrent].excludeHostnames.Set(s)
+}
+
+func (fuc *flagUpstreamConfigs) parseExcludeZones(s string) error {
+	return fuc.configs[fuc.configCurrent].excludeZones.Set(s)
 }
