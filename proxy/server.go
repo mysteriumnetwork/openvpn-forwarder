@@ -42,11 +42,13 @@ type domainTracker interface {
 }
 
 type proxyServer struct {
-	dialer   netproxy.Dialer
-	sm       StickyMapper
-	dt       domainTracker
-	upstream *url.URL
-	portMap  map[string]string
+	allowedSubnets []*net.IPNet
+	allowedIPs     []net.IP
+	dialer         netproxy.Dialer
+	sm             StickyMapper
+	dt             domainTracker
+	upstream       *url.URL
+	portMap        map[string]string
 }
 
 // StickyMapper represent connection stickiness storage.
@@ -56,13 +58,23 @@ type StickyMapper interface {
 }
 
 // NewServer returns new instance of HTTP transparent proxy server
-func NewServer(upstreamDialer netproxy.Dialer, upstreamHost *url.URL, mapper StickyMapper, dt domainTracker, portMap map[string]string) *proxyServer {
+func NewServer(
+	allowedSubnets []*net.IPNet,
+	allowedIPs []net.IP,
+	upstreamDialer netproxy.Dialer,
+	upstreamHost *url.URL,
+	mapper StickyMapper,
+	dt domainTracker,
+	portMap map[string]string,
+) *proxyServer {
 	return &proxyServer{
-		dialer:   upstreamDialer,
-		sm:       mapper,
-		dt:       dt,
-		upstream: upstreamHost,
-		portMap:  portMap,
+		allowedSubnets: allowedSubnets,
+		allowedIPs:     allowedIPs,
+		dialer:         upstreamDialer,
+		sm:             mapper,
+		dt:             dt,
+		upstream:       upstreamHost,
+		portMap:        portMap,
 	}
 }
 
@@ -97,19 +109,46 @@ func (s *proxyServer) handler(l net.Listener, f func(c *Context)) {
 		if !ok {
 			err = fmt.Errorf("non-TCP connection: %T", connMux.Conn)
 		}
+		clientAddr, ok := connTCP.RemoteAddr().(*net.TCPAddr)
+		if !ok {
+			err = fmt.Errorf("non-TCP address: %T", connTCP.RemoteAddr())
+			continue
+		}
 		if err != nil {
-			_ = log.Errorf("Error accepting new connection. %v", err)
+			s.logError(fmt.Sprintf("Error accepting new connection. %v", err), &c)
+			continue
+		}
+
+		clientAddrAllowed := false
+		for _, subnet := range s.allowedSubnets {
+			if subnet.Contains(clientAddr.IP) {
+				clientAddrAllowed = true
+				break
+			}
+		}
+		for _, ip := range s.allowedIPs {
+			if ip.Equal(clientAddr.IP) {
+				clientAddrAllowed = true
+				break
+			}
+		}
+		if !clientAddrAllowed {
+			s.logWarn(fmt.Sprintf("Access restricted from address %s", clientAddr.IP.String()), &c)
 			continue
 		}
 
 		c.connOriginalDst, err = getOriginalDst(connTCP)
-		if err != nil {
-			_ = log.Errorf("Error recovering original destination address. %v", err)
+		if c.connOriginalDst.String() == c.conn.LocalAddr().String() {
+			c.connOriginalDst = nil
 		}
 
 		go func() {
 			f(&c)
 			c.conn.Close()
+
+			if c.connOriginalDst == nil {
+				s.logWarn("Failure recovering original destination address. Are you redirecting from same host network?", &c)
+			}
 		}()
 	}
 }
@@ -117,17 +156,17 @@ func (s *proxyServer) handler(l net.Listener, f func(c *Context)) {
 func (s *proxyServer) serveHTTP(c *Context) {
 	req, err := http.ReadRequest(bufio.NewReader(c.conn))
 	if err != nil {
-		_ = log.Errorf("Failed to read HTTP request: %v", err)
+		s.logAccess(fmt.Sprintf("Failed to accept new HTTP request: %v", err), c)
 		return
 	}
 
 	c.destinationHost = req.Host
 	c.destinationAddress = s.authorityAddr("http", c.destinationHost)
-	s.accessLog("HTTP request", c)
+	s.logAccess("HTTP request", c)
 
 	conn, err := s.connectTo(c.conn, c.destinationAddress)
 	if err != nil {
-		_ = log.Errorf("Error establishing connection to %s: %v", c.destinationAddress, err)
+		s.logError(fmt.Sprintf("Failed to establishing connection. %v", err), c)
 		return
 	}
 	defer conn.Close()
@@ -135,7 +174,7 @@ func (s *proxyServer) serveHTTP(c *Context) {
 	if req.Method == http.MethodConnect {
 		c.conn.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
 	} else if err := req.Write(conn); err != nil {
-		_ = log.Errorf("Failed to forward HTTP request to %s: %v", c.destinationAddress, err)
+		s.logError(fmt.Sprintf("Failed to forward HTTP request. %v", err), c)
 		return
 	}
 
@@ -164,35 +203,39 @@ func (s *proxyServer) serveTLS(c *Context) {
 		// For some malformed TLS connection vhost.TLS could panic.
 		// We don't care about a single failed request, service should keep working.
 		if r := recover(); r != nil {
-			_ = log.Error("Recovered panic in serveTLS", r)
+			s.logError(fmt.Sprintf("Recovered panic in serveTLS. %v", r), c)
 		}
 	}()
 
 	tlsConn, err := vhost.TLS(c.conn)
 	if err != nil {
-		_ = log.Errorf("Error accepting new TLS connection - %v", err)
+		s.logError(fmt.Sprintf("Failed to accept new TLS request. %v", err), c)
 		return
 	}
 	defer tlsConn.Close()
 
-	if tlsConn.Host() == "" {
-		_ = log.Error("Cannot support non-SNI enabled TLS sessions")
+	if tlsConn.Host() != "" {
+		_, port, err := net.SplitHostPort(tlsConn.LocalAddr().String())
+		if err != nil {
+			s.logError("Cannot parse local address", c)
+			return
+		}
+
+		c.destinationHost = tlsConn.Host() + ":" + port
+		c.destinationAddress = s.authorityAddr("https", c.destinationHost)
+	} else if c.connOriginalDst != nil {
+		c.destinationHost = ""
+		c.destinationAddress = c.connOriginalDst.String()
+		s.logWarn("Cannon parse SNI in TLS request", c)
+	} else {
+		s.logError("Cannot support non-SNI enabled TLS sessions", c)
 		return
 	}
-
-	_, port, err := net.SplitHostPort(tlsConn.LocalAddr().String())
-	if err != nil {
-		_ = log.Error("Cannot parse local address")
-		return
-	}
-
-	c.destinationHost = tlsConn.Host() + ":" + port
-	c.destinationAddress = s.authorityAddr("https", c.destinationHost)
-	s.accessLog("HTTPS request", c)
+	s.logAccess("HTTPS request", c)
 
 	conn, err := s.connectTo(c.conn, c.destinationAddress)
 	if err != nil {
-		_ = log.Errorf("Error establishing connection to %s: %v", c.destinationAddress, err)
+		s.logError(fmt.Sprintf("Failed to establishing connection. %v", err), c)
 		return
 	}
 	defer conn.Close()
@@ -291,13 +334,37 @@ func getSockOpt(s int, level int, optname int, optval unsafe.Pointer, optlen *ui
 	return
 }
 
-func (s *proxyServer) accessLog(message string, c *Context) {
+func (s *proxyServer) logAccess(message string, c *Context) {
 	log.Tracef(
 		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
 		message,
 		c.conn.RemoteAddr().String(),
 		c.conn.LocalAddr().String(),
-		c.connOriginalDst,
+		c.connOriginalDst.String(),
+		c.destinationHost,
+		c.destinationAddress,
+	)
+}
+
+func (s *proxyServer) logError(message string, c *Context) {
+	_ = log.Errorf(
+		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
+		message,
+		c.conn.RemoteAddr().String(),
+		c.conn.LocalAddr().String(),
+		c.connOriginalDst.String(),
+		c.destinationHost,
+		c.destinationAddress,
+	)
+}
+
+func (s *proxyServer) logWarn(message string, c *Context) {
+	_ = log.Warnf(
+		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
+		message,
+		c.conn.RemoteAddr().String(),
+		c.conn.LocalAddr().String(),
+		c.connOriginalDst.String(),
 		c.destinationHost,
 		c.destinationAddress,
 	)

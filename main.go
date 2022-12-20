@@ -34,6 +34,7 @@ import (
 
 var logLevel = flag.String("log.level", log.InfoStr, "Set the logging level (trace, debug, info, warn, error, critical)")
 var proxyAddr = flag.String("proxy.bind", ":8443", "Proxy address for incoming connections")
+var proxyAllow = FlagArray("proxy.allow", `Proxy allows connection from these addresses only (separated by comma - "10.13.0.1,10.13.0.0/16")`)
 var proxyAPIAddr = flag.String("proxy.api-bind", ":8000", "HTTP proxy API address")
 var proxyUpstreamURL = flag.String(
 	"proxy.upstream-url",
@@ -129,12 +130,17 @@ func main() {
 		dialer = dialerUpstreamExcluded
 	}
 
+	allowedSubnets, allowedIPs, err := parseAllowedAddresses(*proxyAllow)
+	if err != nil {
+		_ = log.Criticalf("Failed to parse allowed addresses: %v", err)
+		os.Exit(1)
+	}
 	portMap, err := parsePortMap(*proxyMapPort, *proxyAddr)
 	if err != nil {
 		_ = log.Criticalf("Failed to parse port map: %v", err)
 		os.Exit(1)
 	}
-	proxyServer := proxy.NewServer(dialer, dialerUpstreamURL, sm, domainTracer, portMap)
+	proxyServer := proxy.NewServer(allowedSubnets, allowedIPs, dialer, dialerUpstreamURL, sm, domainTracer, portMap)
 
 	var wg sync.WaitGroup
 	for p := range portMap {
@@ -157,6 +163,22 @@ func setLoggerFormat(levelStr string) {
 	writer, _ := log.NewConsoleWriter()
 	logger, _ := log.LoggerFromWriterWithMinLevelAndFormat(writer, level, "%Date %Time [%LEVEL] %Msg%n")
 	log.ReplaceLogger(logger)
+}
+
+func parseAllowedAddresses(addresses flagArray) (subnets []*net.IPNet, ips []net.IP, _ error) {
+	for _, address := range addresses {
+		if _, subnet, err := net.ParseCIDR(address); err == nil {
+			subnets = append(subnets, subnet)
+			continue
+		}
+		if ip := net.ParseIP(address); ip != nil {
+			ips = append(ips, ip)
+			continue
+		}
+		return nil, nil, errors.Errorf("invalid subnet or IP: %s", address)
+	}
+
+	return subnets, ips, nil
 }
 
 func parsePortMap(ports flagArray, proxyAddr string) (map[string]string, error) {
