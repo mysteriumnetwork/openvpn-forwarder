@@ -19,6 +19,7 @@ package proxy
 
 import (
 	"bufio"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -26,24 +27,25 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/pkg/errors"
 	netproxy "golang.org/x/net/proxy"
 )
 
 // NewDialerHTTPConnect returns a new Dialer that dials through the provided
 // proxy server's network and address.
-func NewDialerHTTPConnect(forwardDialer netproxy.Dialer, forwardAddress, user, pass, country string) *dialerHTTPConnect {
+func NewDialerHTTPConnect(forwardDialer netproxy.Dialer, forwardUrl *url.URL, user, pass, country string) *dialerHTTPConnect {
 	return &dialerHTTPConnect{
-		forwardDialer:  forwardDialer,
-		forwardAddress: forwardAddress,
-		user:           user,
-		pass:           pass,
-		country:        country,
+		forwardDialer: forwardDialer,
+		forwardURL:    forwardUrl,
+		user:          user,
+		pass:          pass,
+		country:       country,
 	}
 }
 
 type dialerHTTPConnect struct {
 	forwardDialer       netproxy.Dialer
-	forwardAddress      string
+	forwardURL          *url.URL
 	user, pass, country string
 }
 
@@ -55,7 +57,15 @@ type Connection struct {
 
 // Dial makes actual connection to specified address through intermediate HTTP proxy
 func (dialer *dialerHTTPConnect) Dial(network, address string) (net.Conn, error) {
-	conn, err := dialer.forwardDialer.Dial(network, dialer.forwardAddress)
+	conn, err := dialer.forwardDialer.Dial(network, dialer.forwardURL.Host)
+
+	if dialer.forwardURL.Scheme == "https" {
+		tlsConn := tls.Client(conn.(net.Conn), &tls.Config{ServerName: dialer.forwardURL.Hostname()})
+		if err := tlsConn.Handshake(); err != nil {
+			return nil, errors.Wrap(err, "failed to perform TLS handshake")
+		}
+		conn = tlsConn
+	}
 
 	return &Connection{
 		Conn:    conn,

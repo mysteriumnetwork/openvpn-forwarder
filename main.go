@@ -99,7 +99,7 @@ func main() {
 	apiServer := api.NewServer(*proxyAPIAddr, sm, domainTracer)
 	go apiServer.ListenAndServe()
 
-	dialerUpstream := proxy.NewDialerHTTPConnect(proxy.DialerDirect, dialerUpstreamURL.Host, *proxyUser, *proxyPass, *proxyCountry)
+	dialerUpstream := proxy.NewDialerHTTPConnect(proxy.DialerDirect, dialerUpstreamURL, *proxyUser, *proxyPass, *proxyCountry)
 
 	var dialer netproxy.Dialer
 	if len(*filterHostnames) > 0 || len(*filterZones) > 0 {
@@ -140,7 +140,7 @@ func main() {
 		_ = log.Criticalf("Failed to parse port map: %v", err)
 		os.Exit(1)
 	}
-	proxyServer := proxy.NewServer(allowedSubnets, allowedIPs, dialer, dialerUpstreamURL, sm, domainTracer, portMap)
+	proxyServer := proxy.NewServer(allowedSubnets, allowedIPs, dialer, sm, domainTracer, portMap)
 
 	var wg sync.WaitGroup
 	for p := range portMap {
