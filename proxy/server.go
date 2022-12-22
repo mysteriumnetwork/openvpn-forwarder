@@ -19,12 +19,10 @@ package proxy
 
 import (
 	"bufio"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"syscall"
@@ -47,7 +45,6 @@ type proxyServer struct {
 	dialer         netproxy.Dialer
 	sm             StickyMapper
 	dt             domainTracker
-	upstream       *url.URL
 	portMap        map[string]string
 }
 
@@ -62,7 +59,6 @@ func NewServer(
 	allowedSubnets []*net.IPNet,
 	allowedIPs []net.IP,
 	upstreamDialer netproxy.Dialer,
-	upstreamHost *url.URL,
 	mapper StickyMapper,
 	dt domainTracker,
 	portMap map[string]string,
@@ -73,7 +69,6 @@ func NewServer(
 		dialer:         upstreamDialer,
 		sm:             mapper,
 		dt:             dt,
-		upstream:       upstreamHost,
 		portMap:        portMap,
 	}
 }
@@ -164,7 +159,7 @@ func (s *proxyServer) serveHTTP(c *Context) {
 	c.destinationAddress = s.authorityAddr("http", c.destinationHost)
 	s.logAccess("HTTP request", c)
 
-	conn, err := s.connectTo(c.conn, c.destinationAddress)
+	conn, err := s.connectTo(c, c.destinationAddress)
 	if err != nil {
 		s.logError(fmt.Sprintf("Failed to establishing connection. %v", err), c)
 		return
@@ -233,7 +228,7 @@ func (s *proxyServer) serveTLS(c *Context) {
 	}
 	s.logAccess("HTTPS request", c)
 
-	conn, err := s.connectTo(c.conn, c.destinationAddress)
+	conn, err := s.connectTo(c, c.destinationAddress)
 	if err != nil {
 		s.logError(fmt.Sprintf("Failed to establishing connection. %v", err), c)
 		return
@@ -244,25 +239,17 @@ func (s *proxyServer) serveTLS(c *Context) {
 	io.Copy(tlsConn, conn)
 }
 
-func (s *proxyServer) connectTo(c net.Conn, remoteHost string) (conn io.ReadWriteCloser, err error) {
+func (s *proxyServer) connectTo(c *Context, remoteHost string) (conn io.ReadWriteCloser, err error) {
+	domain := strings.Split(remoteHost, ":")
+	s.dt.Inc(domain[0])
+
 	conn, err = s.dialer.Dial("tcp", remoteHost)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to establish connection")
 	}
 
-	domain := strings.Split(remoteHost, ":")
-	s.dt.Inc(domain[0])
-
 	if proxyConnection, ok := conn.(*Connection); ok {
-		if s.upstream.Scheme == "https" {
-			tlsConn := tls.Client(conn.(net.Conn), &tls.Config{ServerName: s.upstream.Hostname()})
-			if err := tlsConn.Handshake(); err != nil {
-				return nil, errors.Wrap(err, "failed to perform TLS handshake")
-			}
-			conn = tlsConn
-		}
-
-		clientHost, _, err := net.SplitHostPort(c.RemoteAddr().String())
+		clientHost, _, err := net.SplitHostPort(c.conn.RemoteAddr().String())
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to get host from address")
 		}
