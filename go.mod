@@ -3,6 +3,7 @@ module github.com/mysteriumnetwork/openvpn-forwarder
 go 1.18
 
 require (
+	github.com/cihub/seelog v0.0.0-20170130134532-f561c5e57575
 	github.com/gin-gonic/gin v1.4.0
 	github.com/inconshreveable/go-vhost v0.0.0-20160627193104-06d84117953b
 	github.com/magefile/mage v1.8.0
@@ -15,7 +16,6 @@ require (
 )
 
 require (
-	github.com/cihub/seelog v0.0.0-20170130134532-f561c5e57575 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
@@ -33,7 +33,7 @@ require (
 	github.com/tidwall/rtree v0.0.0-20180113144539-6cd427091e0e // indirect
 	github.com/tidwall/tinyqueue v0.0.0-20180302190814-1e39f5511563 // indirect
 	github.com/ugorji/go/codec v1.1.7 // indirect
-	golang.org/x/sys v0.0.0-20210119212857-b64e53b001e4 // indirect
+	golang.org/x/sys v0.1.0 // indirect
 	golang.org/x/text v0.3.3 // indirect
 	google.golang.org/grpc v1.50.1 // indirect
 	google.golang.org/grpc/examples v0.0.0-20221116180207-817c1e8c417e // indirect
