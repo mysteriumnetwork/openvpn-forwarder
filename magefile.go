@@ -41,7 +41,7 @@ func Run() error {
 	return sh.RunV(buildPath,
 		"--log.level=trace",
 		"--proxy.bind=:8443",
-		"--proxy.allow=127.0.0.1",
+		"--proxy.allow=0.0.0.0/0",
 		"--proxy.upstream-url=http://superproxy.com:8080",
 		"--proxy.user=",
 		"--proxy.pass=",

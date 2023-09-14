@@ -30,6 +30,7 @@ import (
 
 	log "github.com/cihub/seelog"
 	"github.com/inconshreveable/go-vhost"
+	proxyproto "github.com/pires/go-proxyproto"
 	"github.com/pkg/errors"
 	"github.com/soheilhy/cmux"
 	netproxy "golang.org/x/net/proxy"
@@ -86,6 +87,42 @@ func (s *proxyServer) ListenAndServe(addr string) error {
 
 	go s.handler(httpL, s.serveHTTP)
 	go s.handler(httpsL, s.serveTLS)
+
+	haproxyL := &proxyproto.Listener{
+		Listener: m.Match(cmux.PrefixMatcher(string(proxyproto.SIGV2))),
+	}
+	go func() {
+		conn, err := haproxyL.Accept()
+		if err != nil {
+			_ = log.Errorf("Error accepting new HAPROXY connection. %v", err)
+		}
+		fmt.Println("==serveHAProxy")
+		//fmt.Printf("==serveHAProxy %s, %s, %#v\n\n", conn.LocalAddr(), conn.RemoteAddr(), conn)
+
+		connHaproxy, ok := conn.(*proxyproto.Conn)
+		if !ok {
+			err = fmt.Errorf("non-HAProxy connection: %T", conn)
+		}
+		if err != nil {
+			log.Errorf("Error accepting new HAPROXY connection. %v", err)
+		}
+
+		fmt.Printf("==PROXY header: %#v\n", connHaproxy.ProxyHeader())
+		fmt.Printf("==PROXY IPs: %s, %s\n", connHaproxy.LocalAddr(), connHaproxy.RemoteAddr())
+
+		// Loop reading messages. Send each message to the channel.
+		for {
+			var readMsg = make([]byte, 512)
+			var readN int
+			var readErr error
+			readN, readErr = connHaproxy.Read(readMsg)
+			fmt.Printf("==PROXY error: %v\n", readErr)
+			fmt.Printf("==PROXY body %d:\n%s\n\n", readN, readMsg)
+			if readN <= 0 {
+				continue
+			}
+		}
+	}()
 
 	return m.Serve()
 }
@@ -237,6 +274,18 @@ func (s *proxyServer) serveTLS(c *Context) {
 
 	go io.Copy(conn, tlsConn)
 	io.Copy(tlsConn, conn)
+}
+
+func (s *proxyServer) serveHAProxy(c *Context) {
+	defer func() {
+		// For some malformed TLS connection vhost.TLS could panic.
+		// We don't care about a single failed request, service should keep working.
+		if r := recover(); r != nil {
+			s.logError(fmt.Sprintf("Recovered panic in serveHAProxy. %v", r), c)
+		}
+	}()
+
+	fmt.Println("==serveHAProxy", c.destinationHost)
 }
 
 func (s *proxyServer) connectTo(c *Context, remoteHost string) (conn io.ReadWriteCloser, err error) {

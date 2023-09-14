@@ -34,3 +34,11 @@ services:
     ports:
     - "18080:18080"
     - "19999:19999"
+
+  haproxy-gateway:
+    image: haproxy
+    volumes:
+      - ./e2e/haproxy-gateway:/usr/local/etc/haproxy
+    ports:
+    - "28080:28080"
+    - "29999:29999"
