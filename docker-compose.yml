@@ -26,3 +26,11 @@ services:
     cap_add:
     - NET_ADMIN
     - NET_RAW
+
+  haproxy-forwarder:
+    image: haproxy
+    volumes:
+      - ./e2e/haproxy-forwarder:/usr/local/etc/haproxy
+    ports:
+    - "18080:18080"
+    - "19999:19999"
