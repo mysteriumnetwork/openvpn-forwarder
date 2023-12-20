@@ -7,8 +7,9 @@ import (
 )
 
 type Service struct {
-	proxyRequestDuration *prometheus.HistogramVec
-	proxyRequestData     *prometheus.CounterVec
+	proxyRequestDuration    *prometheus.HistogramVec
+	proxyRequestData        *prometheus.CounterVec
+	proxyNumberOfConnecions *prometheus.GaugeVec
 }
 
 func NewMetricsService() (*Service, error) {
@@ -30,9 +31,19 @@ func NewMetricsService() (*Service, error) {
 		return nil, err
 	}
 
+	proxyNumberOfConnections := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "proxy_number_of_connections",
+		Help: "Number of currently live connections",
+	}, []string{})
+
+	if err := prometheus.Register(proxyNumberOfConnections); err != nil {
+		return nil, err
+	}
+
 	return &Service{
-		proxyRequestDuration: proxyRequestDuration,
-		proxyRequestData:     proxyRequestData,
+		proxyRequestDuration:    proxyRequestDuration,
+		proxyRequestData:        proxyRequestData,
+		proxyNumberOfConnecions: proxyNumberOfConnections,
 	}, nil
 }
 
@@ -40,7 +51,9 @@ func (s *Service) ProxyMiddleware(next func(c *proxy.Context), proxyHandlerType 
 	return func(c *proxy.Context) {
 		startTime := time.Now()
 
+		s.proxyNumberOfConnecions.With(prometheus.Labels{}).Inc()
 		next(c)
+		s.proxyNumberOfConnecions.With(prometheus.Labels{}).Dec()
 
 		s.proxyRequestDuration.With(prometheus.Labels{
 			"request_type": proxyHandlerType,
