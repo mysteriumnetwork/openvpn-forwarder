@@ -13,6 +13,7 @@ type Service struct {
 	proxyRequestData                  *prometheus.CounterVec
 	proxyNumberOfLiveConnecions       *prometheus.GaugeVec
 	proxyNumberOfIncommingConnections *prometheus.CounterVec
+	proxyNumberOfProcessedConnections *prometheus.CounterVec
 }
 
 func NewMetricsService() (*Service, error) {
@@ -52,11 +53,21 @@ func NewMetricsService() (*Service, error) {
 		return nil, err
 	}
 
+	proxyNumberOfProcessedConnections := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "proxy_number_of_processed_connections",
+		Help: "Number of incmming connections which were succesfully assigned and processed",
+	}, []string{"request_type"})
+
+	if err := prometheus.Register(proxyNumberOfProcessedConnections); err != nil {
+		return nil, err
+	}
+
 	return &Service{
 		proxyRequestDuration:              proxyRequestDuration,
 		proxyRequestData:                  proxyRequestData,
 		proxyNumberOfLiveConnecions:       proxyNumberOfLiveConnections,
 		proxyNumberOfIncommingConnections: proxyNumberOfIncommingConnections,
+		proxyNumberOfProcessedConnections: proxyNumberOfProcessedConnections,
 	}, nil
 }
 
@@ -87,6 +98,10 @@ func (s *Service) ProxyHandlerMiddleware(next func(c *proxy.Context), proxyHandl
 			"request_type": proxyHandlerType,
 			"direction":    "received",
 		}).Add(float64(c.BytesReceived()))
+
+		s.proxyNumberOfProcessedConnections.With(prometheus.Labels{
+			"request_type": proxyHandlerType,
+		}).Inc()
 	}
 }
 
