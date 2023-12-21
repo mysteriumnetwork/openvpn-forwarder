@@ -20,6 +20,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/mysteriumnetwork/openvpn-forwarder/metrics"
 	"net"
 	"net/url"
 	"os"
@@ -115,7 +116,14 @@ func main() {
 		_ = log.Criticalf("Failed to parse port map: %v", err)
 		os.Exit(1)
 	}
-	proxyServer := proxy.NewServer(allowedSubnets, allowedIPs, dialer, sm, domainTracer, portMap)
+	metricService, err := metrics.NewMetricsService()
+	if err != nil {
+		_ = log.Criticalf("Failed to start metrics service: %s", err)
+		os.Exit(1)
+	}
+
+	proxyServer := proxy.NewServer(allowedSubnets, allowedIPs, dialer, sm, domainTracer, portMap, metricService.ProxyHandlerMiddleware)
+	proxyServer.AddListener(metricService)
 
 	var wg sync.WaitGroup
 	for p := range portMap {

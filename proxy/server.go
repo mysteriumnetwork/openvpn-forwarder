@@ -35,17 +35,28 @@ import (
 	netproxy "golang.org/x/net/proxy"
 )
 
+type HandlerMiddleware func(func(c *Context), string) func(*Context)
+
+const SO_ORIGINAL_DST = 0x50
+
+type Listener interface {
+	OnProxyConnectionAccept()
+}
+
 type domainTracker interface {
 	Inc(domain string)
 }
 
 type proxyServer struct {
-	allowedSubnets []*net.IPNet
-	allowedIPs     []net.IP
-	dialer         netproxy.Dialer
-	sm             StickyMapper
-	dt             domainTracker
-	portMap        map[string]string
+	allowedSubnets    []*net.IPNet
+	allowedIPs        []net.IP
+	dialer            netproxy.Dialer
+	sm                StickyMapper
+	dt                domainTracker
+	portMap           map[string]string
+	handlerMiddleware HandlerMiddleware
+
+	listeners []Listener
 }
 
 // StickyMapper represent connection stickiness storage.
@@ -62,14 +73,16 @@ func NewServer(
 	mapper StickyMapper,
 	dt domainTracker,
 	portMap map[string]string,
+	handlerMiddleware HandlerMiddleware,
 ) *proxyServer {
 	return &proxyServer{
-		allowedSubnets: allowedSubnets,
-		allowedIPs:     allowedIPs,
-		dialer:         upstreamDialer,
-		sm:             mapper,
-		dt:             dt,
-		portMap:        portMap,
+		allowedSubnets:    allowedSubnets,
+		allowedIPs:        allowedIPs,
+		dialer:            upstreamDialer,
+		sm:                mapper,
+		dt:                dt,
+		portMap:           portMap,
+		handlerMiddleware: handlerMiddleware,
 	}
 }
 
@@ -84,10 +97,22 @@ func (s *proxyServer) ListenAndServe(addr string) error {
 	httpsL := m.Match(cmux.TLS())
 	httpL := m.Match(cmux.HTTP1Fast())
 
-	go s.handler(httpL, s.serveHTTP)
-	go s.handler(httpsL, s.serveTLS)
+	httpHandler := s.serveHTTP
+	tlsHandler := s.serveTLS
+
+	if s.handlerMiddleware != nil {
+		httpHandler = s.handlerMiddleware(httpHandler, "HTTP")
+		tlsHandler = s.handlerMiddleware(tlsHandler, "HTTPS")
+	}
+
+	go s.handler(httpL, httpHandler)
+	go s.handler(httpsL, tlsHandler)
 
 	return m.Serve()
+}
+
+func (s *proxyServer) AddListener(listener Listener) {
+	s.listeners = append(s.listeners, listener)
 }
 
 func (s *proxyServer) handler(l net.Listener, f func(c *Context)) {
@@ -96,6 +121,7 @@ func (s *proxyServer) handler(l net.Listener, f func(c *Context)) {
 		var err error
 
 		c.conn, err = l.Accept()
+		s.sendOnProxyConnectionAccept()
 		connMux, ok := c.conn.(*cmux.MuxConn)
 		if !ok {
 			err = fmt.Errorf("unsupported connection: %T", c.conn)
@@ -173,8 +199,9 @@ func (s *proxyServer) serveHTTP(c *Context) {
 		return
 	}
 
-	go io.Copy(conn, c.conn)
-	io.Copy(c.conn, conn)
+	sent, received := s.copyStreams(conn, c)
+	c.bytesSent = sent
+	c.bytesReceived = received
 }
 
 func (s *proxyServer) authorityAddr(scheme, authority string) string {
@@ -235,8 +262,31 @@ func (s *proxyServer) serveTLS(c *Context) {
 	}
 	defer conn.Close()
 
-	go io.Copy(conn, tlsConn)
-	io.Copy(tlsConn, conn)
+	sent, received := s.copyStreams(conn, c)
+	c.bytesSent = sent
+	c.bytesReceived = received
+}
+
+func (s *proxyServer) copyStreams(destinationConn io.ReadWriteCloser, c *Context) (int64, int64) {
+	OutgoingChan, IncomingChan := make(chan int64), make(chan int64)
+	go func() {
+		written, err := io.Copy(destinationConn, c.conn) // Outgoing
+		if err != nil {
+			s.logError(fmt.Sprintf("error copying outgoing traffic: %s", err), c)
+		}
+		OutgoingChan <- written
+		close(OutgoingChan)
+	}()
+	go func() {
+		written, err := io.Copy(c.conn, destinationConn) // Incoming
+		if err != nil {
+			s.logError(fmt.Sprintf("error copying outgoing traffic: %s", err), c)
+		}
+		IncomingChan <- written
+		close(IncomingChan)
+	}()
+
+	return <-OutgoingChan, <-IncomingChan
 }
 
 func (s *proxyServer) connectTo(c *Context, remoteHost string) (conn io.ReadWriteCloser, err error) {
@@ -261,7 +311,47 @@ func (s *proxyServer) connectTo(c *Context, remoteHost string) (conn io.ReadWrit
 	return conn, nil
 }
 
-const SO_ORIGINAL_DST = 0x50
+func (s *proxyServer) logAccess(message string, c *Context) {
+	log.Tracef(
+		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
+		message,
+		c.conn.RemoteAddr().String(),
+		c.conn.LocalAddr().String(),
+		c.connOriginalDst.String(),
+		c.destinationHost,
+		c.destinationAddress,
+	)
+}
+
+func (s *proxyServer) logError(message string, c *Context) {
+	_ = log.Errorf(
+		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
+		message,
+		c.conn.RemoteAddr().String(),
+		c.conn.LocalAddr().String(),
+		c.connOriginalDst.String(),
+		c.destinationHost,
+		c.destinationAddress,
+	)
+}
+
+func (s *proxyServer) logWarn(message string, c *Context) {
+	_ = log.Warnf(
+		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
+		message,
+		c.conn.RemoteAddr().String(),
+		c.conn.LocalAddr().String(),
+		c.connOriginalDst.String(),
+		c.destinationHost,
+		c.destinationAddress,
+	)
+}
+
+func (s *proxyServer) sendOnProxyConnectionAccept() {
+	for _, listener := range s.listeners {
+		go listener.OnProxyConnectionAccept()
+	}
+}
 
 // getOriginalDst retrieves the original destination address from
 // NATed connection.  Currently, only Linux iptables using DNAT/REDIRECT
@@ -319,40 +409,4 @@ func getSockOpt(s int, level int, optname int, optval unsafe.Pointer, optlen *ui
 		return e
 	}
 	return
-}
-
-func (s *proxyServer) logAccess(message string, c *Context) {
-	log.Tracef(
-		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
-		message,
-		c.conn.RemoteAddr().String(),
-		c.conn.LocalAddr().String(),
-		c.connOriginalDst.String(),
-		c.destinationHost,
-		c.destinationAddress,
-	)
-}
-
-func (s *proxyServer) logError(message string, c *Context) {
-	_ = log.Errorf(
-		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
-		message,
-		c.conn.RemoteAddr().String(),
-		c.conn.LocalAddr().String(),
-		c.connOriginalDst.String(),
-		c.destinationHost,
-		c.destinationAddress,
-	)
-}
-
-func (s *proxyServer) logWarn(message string, c *Context) {
-	_ = log.Warnf(
-		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
-		message,
-		c.conn.RemoteAddr().String(),
-		c.conn.LocalAddr().String(),
-		c.connOriginalDst.String(),
-		c.destinationHost,
-		c.destinationAddress,
-	)
 }

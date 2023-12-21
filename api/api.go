@@ -18,6 +18,7 @@
 package api
 
 import (
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"net/http"
 	"time"
 
@@ -42,6 +43,7 @@ func NewServer(addr string, storage stickySaver, dt domainTracker) *http.Server 
 	gin.SetMode(gin.ReleaseMode)
 	ginEngine := gin.Default()
 
+	ginEngine.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	v1 := ginEngine.Group("/api/v1")
 	{
 		v1.POST("/map", func(c *gin.Context) {
