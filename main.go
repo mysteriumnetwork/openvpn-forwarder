@@ -121,7 +121,9 @@ func main() {
 		_ = log.Criticalf("Failed to start metrics service: %s", err)
 		os.Exit(1)
 	}
-	proxyServer := proxy.NewServer(allowedSubnets, allowedIPs, dialer, sm, domainTracer, portMap, metricService.ProxyMiddleware)
+
+	proxyServer := proxy.NewServer(allowedSubnets, allowedIPs, dialer, sm, domainTracer, portMap, metricService.ProxyHandlerMiddleware)
+	proxyServer.AddListener(metricService)
 
 	var wg sync.WaitGroup
 	for p := range portMap {

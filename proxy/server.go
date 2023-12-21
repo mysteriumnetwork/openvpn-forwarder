@@ -39,6 +39,10 @@ type HandlerMiddleware func(func(c *Context), string) func(*Context)
 
 const SO_ORIGINAL_DST = 0x50
 
+type Listener interface {
+	OnProxyConnectionAccept()
+}
+
 type domainTracker interface {
 	Inc(domain string)
 }
@@ -51,6 +55,8 @@ type proxyServer struct {
 	dt                domainTracker
 	portMap           map[string]string
 	handlerMiddleware HandlerMiddleware
+
+	listeners []Listener
 }
 
 // StickyMapper represent connection stickiness storage.
@@ -105,12 +111,17 @@ func (s *proxyServer) ListenAndServe(addr string) error {
 	return m.Serve()
 }
 
+func (s *proxyServer) AddListener(listener Listener) {
+	s.listeners = append(s.listeners, listener)
+}
+
 func (s *proxyServer) handler(l net.Listener, f func(c *Context)) {
 	for {
 		var c Context
 		var err error
 
 		c.conn, err = l.Accept()
+		s.sendOnProxyConnectionAccept()
 		connMux, ok := c.conn.(*cmux.MuxConn)
 		if !ok {
 			err = fmt.Errorf("unsupported connection: %T", c.conn)
@@ -334,6 +345,12 @@ func (s *proxyServer) logWarn(message string, c *Context) {
 		c.destinationHost,
 		c.destinationAddress,
 	)
+}
+
+func (s *proxyServer) sendOnProxyConnectionAccept() {
+	for _, listener := range s.listeners {
+		go listener.OnProxyConnectionAccept()
+	}
 }
 
 // getOriginalDst retrieves the original destination address from
