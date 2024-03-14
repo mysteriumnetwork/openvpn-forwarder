@@ -280,7 +280,7 @@ func (s *proxyServer) copyStreams(destinationConn io.ReadWriteCloser, c *Context
 	go func() {
 		written, err := io.Copy(c.conn, destinationConn) // Incoming
 		if err != nil {
-			s.logError(fmt.Sprintf("error copying outgoing traffic: %s", err), c)
+			s.logError(fmt.Sprintf("error copying incoming traffic: %s", err), c)
 		}
 		IncomingChan <- written
 		close(IncomingChan)
