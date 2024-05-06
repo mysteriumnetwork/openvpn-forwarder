@@ -28,11 +28,6 @@ import (
 	"github.com/magefile/mage/sh"
 )
 
-var (
-	ipTablesAppend = sh.RunCmd("iptables", "-t", "nat", "-A")
-	ipTablesDelete = sh.RunCmd("iptables", "-t", "nat", "-D")
-)
-
 // TestHTTPS runs end-to-end test for HTTPS traffic forwarding
 func TestHTTPS(t *testing.T) {
 	// given
@@ -45,8 +40,8 @@ func TestHTTPS(t *testing.T) {
 
 	// when
 	redirectRule := []string{"OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "443", "-j", "DNAT", "--to-destination", forwarderIP + ":8443"}
-	err = ipTablesAppend(redirectRule...)
-	defer ipTablesDelete(redirectRule...)
+	err = ipTablesAppend(redirectRule)
+	defer ipTablesDelete(redirectRule)
 	assert.NoError(t, err)
 
 	// then
@@ -69,8 +64,8 @@ func TestHTTP(t *testing.T) {
 
 	// when
 	redirectRule := []string{"OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "80", "-j", "DNAT", "--to-destination", forwarderIP + ":8443"}
-	err = ipTablesAppend(redirectRule...)
-	defer ipTablesDelete(redirectRule...)
+	err = ipTablesAppend(redirectRule)
+	defer ipTablesDelete(redirectRule)
 	assert.NoError(t, err)
 
 	currentIP, err := checkIP("http://api.ipify.org/?format=text")
@@ -91,16 +86,17 @@ func TestHTTPWithCloseHeader(t *testing.T) {
 
 	// when
 	redirectRule := []string{"OUTPUT", "-p", "tcp", "-m", "tcp", "--dport", "80", "-j", "DNAT", "--to-destination", forwarderIP + ":8443"}
-	err = ipTablesAppend(redirectRule...)
-	defer ipTablesDelete(redirectRule...)
+	err = ipTablesAppend(redirectRule)
+	defer ipTablesDelete(redirectRule)
 	assert.NoError(t, err)
 
-	currentIP, err := sh.Output(
+	cmd, args := execInTestMachineCmd(
 		"curl", "-s",
 		"--http1.1",
 		"-H", "Connection: close",
 		"http://api.ipify.org/?format=text",
 	)
+	currentIP, err := sh.Output(cmd, args...)
 	t.Log("Current IP:", currentIP)
 	assert.NoError(t, err)
 
@@ -108,9 +104,41 @@ func TestHTTPWithCloseHeader(t *testing.T) {
 }
 
 func getForwarderIP() (string, error) {
-	return sh.Output("dig", "forwarder", "+short")
+	cmd, args := execInTestMachineCmd("dig", "forwarder", "+short")
+	return sh.Output(cmd, args...)
 }
 
 func checkIP(apiURL string) (string, error) {
-	return sh.Output("curl", "-s", apiURL)
+	cmd, args := execInTestMachineCmd("curl", "-s", apiURL)
+	return sh.Output(cmd, args...)
+}
+
+func ipTablesAppend(ruleArgs []string) error {
+	return execInTestMachine(
+		append(
+			[]string{"iptables", "-t", "nat", "-A"},
+			ruleArgs...,
+		)...,
+	)
+}
+
+func ipTablesDelete(ruleArgs []string) error {
+	return execInTestMachine(
+		append(
+			[]string{"iptables", "-t", "nat", "-D"},
+			ruleArgs...,
+		)...,
+	)
+}
+
+func execInTestMachine(args ...string) error {
+	cmd, args := execInTestMachineCmd(args...)
+	return sh.RunV(cmd, args...)
+}
+
+func execInTestMachineCmd(args ...string) (string, []string) {
+	return runComposeCmd(append(
+		[]string{"exec", "-T", "machine"},
+		args...,
+	)...)
 }
