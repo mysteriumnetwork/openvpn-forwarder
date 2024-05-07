@@ -263,11 +263,11 @@ func (s *proxyServer) serveTLS(c *Context) {
 	io.Copy(tlsConn, conn)
 }
 
-func (s *proxyServer) connectTo(c *Context, remoteHost string) (conn io.ReadWriteCloser, err error) {
+func (s *proxyServer) connectTo(c *Context, remoteHost string) (*Conn, error) {
 	domain := strings.Split(remoteHost, ":")
 	s.dt.Inc(domain[0])
 
-	conn, err = s.dialer.Dial("tcp", remoteHost)
+	conn, err := s.dialer.Dial("tcp", remoteHost)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to establish connection")
 	}
@@ -282,7 +282,7 @@ func (s *proxyServer) connectTo(c *Context, remoteHost string) (conn io.ReadWrit
 		}
 	}
 
-	return conn, nil
+	return NewConn(conn), nil
 }
 
 func (s *proxyServer) sendOnProxyConnectionAccept() {
