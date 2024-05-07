@@ -20,7 +20,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/mysteriumnetwork/openvpn-forwarder/metrics"
 	"net"
 	"net/url"
 	"os"
@@ -28,10 +27,12 @@ import (
 	"sync"
 
 	log "github.com/cihub/seelog"
-	"github.com/mysteriumnetwork/openvpn-forwarder/api"
-	"github.com/mysteriumnetwork/openvpn-forwarder/proxy"
 	"github.com/pkg/errors"
 	netproxy "golang.org/x/net/proxy"
+
+	"github.com/mysteriumnetwork/openvpn-forwarder/api"
+	"github.com/mysteriumnetwork/openvpn-forwarder/metrics"
+	"github.com/mysteriumnetwork/openvpn-forwarder/proxy"
 )
 
 var logLevel = flag.String("log.level", log.InfoStr, "Set the logging level (trace, debug, info, warn, error, critical)")

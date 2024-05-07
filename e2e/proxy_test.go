@@ -109,7 +109,7 @@ func getForwarderIP() (string, error) {
 }
 
 func checkIP(apiURL string) (string, error) {
-	cmd, args := execInTestMachineCmd("curl", "-s", apiURL)
+	cmd, args := execInTestMachineCmd("curl", "--silent", "--fail", "--max-time", "5", apiURL)
 	return sh.Output(cmd, args...)
 }
 

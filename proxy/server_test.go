@@ -36,11 +36,11 @@ func Test_Server_ServeHTTP(t *testing.T) {
 	upstreamAddr := upstreamServer.run()
 	defer upstreamServer.stop()
 
-	upstreamDialer := NewDialerHTTPConnect(DialerDirect, upstreamAddr, "", "", "")
+	upstreamDialer := NewDialerHTTPConnect(DialerDirect, &url.URL{Host: upstreamAddr}, "", "", "")
 
 	req, _ := http.NewRequest("GET", "http://domain.com", nil)
 
-	proxyServer := NewServer(nil, []net.IP{net.ParseIP("::1")}, upstreamDialer, &url.URL{}, &stickyMapperStub{}, &noopTracer{}, nil)
+	proxyServer := NewServer(nil, []net.IP{net.ParseIP("::1")}, upstreamDialer, &stickyMapperStub{}, &noopTracer{}, nil, nil)
 	proxyAddr := listenAndServe(proxyServer)
 
 	proxyURL, _ := url.Parse("http://" + proxyAddr)
@@ -63,11 +63,11 @@ func Test_Server_AuthHeaderAdded(t *testing.T) {
 	upstreamAddr := upstreamServer.run()
 	defer upstreamServer.stop()
 
-	upstreamDialer := NewDialerHTTPConnect(DialerDirect, upstreamAddr, "uuuu", "1234", "")
+	upstreamDialer := NewDialerHTTPConnect(DialerDirect, &url.URL{Host: upstreamAddr}, "uuuu", "1234", "")
 
 	req, _ := http.NewRequest("GET", "http://domain.com", nil)
 
-	proxyServer := NewServer(nil, []net.IP{net.ParseIP("::1")}, upstreamDialer, &url.URL{}, &stickyMapperStub{}, &noopTracer{}, nil)
+	proxyServer := NewServer(nil, []net.IP{net.ParseIP("::1")}, upstreamDialer, &stickyMapperStub{}, &noopTracer{}, nil, nil)
 	proxyAddr := listenAndServe(proxyServer)
 
 	proxyURL, _ := url.Parse("http://" + proxyAddr)
@@ -90,8 +90,8 @@ func listenAndServe(s *proxyServer) string {
 	httpsL := m.Match(cmux.TLS())
 	httpL := m.Match(cmux.HTTP1Fast())
 
-	go s.handler(httpL, s.serveHTTP)
-	go s.handler(httpsL, s.serveTLS)
+	go s.handler(httpL, s.serveHTTP, "http")
+	go s.handler(httpsL, s.serveTLS, "https")
 
 	go m.Serve()
 	time.Sleep(100 * time.Millisecond) // waiting for server to start
