@@ -37,8 +37,6 @@ import (
 
 type HandlerMiddleware func(func(c *Context), string) func(*Context)
 
-const SO_ORIGINAL_DST = 0x50
-
 type Listener interface {
 	OnProxyConnectionAccept()
 }
@@ -199,9 +197,8 @@ func (s *proxyServer) serveHTTP(c *Context) {
 		return
 	}
 
-	sent, received := s.copyStreams(conn, c)
-	c.bytesSent = sent
-	c.bytesReceived = received
+	go io.Copy(conn, c.conn)
+	io.Copy(c.conn, conn)
 }
 
 func (s *proxyServer) authorityAddr(scheme, authority string) string {
@@ -262,31 +259,8 @@ func (s *proxyServer) serveTLS(c *Context) {
 	}
 	defer conn.Close()
 
-	sent, received := s.copyStreams(conn, c)
-	c.bytesSent = sent
-	c.bytesReceived = received
-}
-
-func (s *proxyServer) copyStreams(destinationConn io.ReadWriteCloser, c *Context) (int64, int64) {
-	OutgoingChan, IncomingChan := make(chan int64), make(chan int64)
-	go func() {
-		written, err := io.Copy(destinationConn, c.conn) // Outgoing
-		if err != nil {
-			s.logError(fmt.Sprintf("error copying outgoing traffic: %s", err), c)
-		}
-		OutgoingChan <- written
-		close(OutgoingChan)
-	}()
-	go func() {
-		written, err := io.Copy(c.conn, destinationConn) // Incoming
-		if err != nil {
-			s.logError(fmt.Sprintf("error copying outgoing traffic: %s", err), c)
-		}
-		IncomingChan <- written
-		close(IncomingChan)
-	}()
-
-	return <-OutgoingChan, <-IncomingChan
+	go io.Copy(conn, tlsConn)
+	io.Copy(tlsConn, conn)
 }
 
 func (s *proxyServer) connectTo(c *Context, remoteHost string) (conn io.ReadWriteCloser, err error) {
@@ -311,47 +285,13 @@ func (s *proxyServer) connectTo(c *Context, remoteHost string) (conn io.ReadWrit
 	return conn, nil
 }
 
-func (s *proxyServer) logAccess(message string, c *Context) {
-	log.Tracef(
-		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
-		message,
-		c.conn.RemoteAddr().String(),
-		c.conn.LocalAddr().String(),
-		c.connOriginalDst.String(),
-		c.destinationHost,
-		c.destinationAddress,
-	)
-}
-
-func (s *proxyServer) logError(message string, c *Context) {
-	_ = log.Errorf(
-		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
-		message,
-		c.conn.RemoteAddr().String(),
-		c.conn.LocalAddr().String(),
-		c.connOriginalDst.String(),
-		c.destinationHost,
-		c.destinationAddress,
-	)
-}
-
-func (s *proxyServer) logWarn(message string, c *Context) {
-	_ = log.Warnf(
-		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
-		message,
-		c.conn.RemoteAddr().String(),
-		c.conn.LocalAddr().String(),
-		c.connOriginalDst.String(),
-		c.destinationHost,
-		c.destinationAddress,
-	)
-}
-
 func (s *proxyServer) sendOnProxyConnectionAccept() {
 	for _, listener := range s.listeners {
 		go listener.OnProxyConnectionAccept()
 	}
 }
+
+const SO_ORIGINAL_DST = 0x50
 
 // getOriginalDst retrieves the original destination address from
 // NATed connection.  Currently, only Linux iptables using DNAT/REDIRECT
@@ -409,4 +349,40 @@ func getSockOpt(s int, level int, optname int, optval unsafe.Pointer, optlen *ui
 		return e
 	}
 	return
+}
+
+func (s *proxyServer) logAccess(message string, c *Context) {
+	log.Tracef(
+		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
+		message,
+		c.conn.RemoteAddr().String(),
+		c.conn.LocalAddr().String(),
+		c.connOriginalDst.String(),
+		c.destinationHost,
+		c.destinationAddress,
+	)
+}
+
+func (s *proxyServer) logError(message string, c *Context) {
+	_ = log.Errorf(
+		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
+		message,
+		c.conn.RemoteAddr().String(),
+		c.conn.LocalAddr().String(),
+		c.connOriginalDst.String(),
+		c.destinationHost,
+		c.destinationAddress,
+	)
+}
+
+func (s *proxyServer) logWarn(message string, c *Context) {
+	_ = log.Warnf(
+		"%s [client_addr=%s, dest_addr=%s, original_dest_addr=%s destination_host=%s, destination_addr=%s]",
+		message,
+		c.conn.RemoteAddr().String(),
+		c.conn.LocalAddr().String(),
+		c.connOriginalDst.String(),
+		c.destinationHost,
+		c.destinationAddress,
+	)
 }
