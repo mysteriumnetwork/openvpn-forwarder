@@ -1,6 +1,8 @@
 module github.com/mysteriumnetwork/openvpn-forwarder
 
-go 1.18
+go 1.21
+
+toolchain go1.21.2
 
 require (
 	github.com/cihub/seelog v0.0.0-20170130134532-f561c5e57575

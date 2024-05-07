@@ -1,4 +1,4 @@
-FROM golang:1.18-alpine
+FROM golang:1.21-alpine
 
 # Install packages
 RUN apk add --update --no-cache bash git gcc musl-dev make iptables bind-tools curl
