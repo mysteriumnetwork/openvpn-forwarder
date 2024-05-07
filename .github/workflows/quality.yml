@@ -45,6 +45,10 @@ jobs:
     name: "End-to-end tests"
     needs: [ unit-test, check ]
     runs-on: ubuntu-latest
+    env:
+      UPSTREAM_PROXY_URL: ${{ secrets.UPSTREAM_PROXY_URL }}
+      UPSTREAM_PROXY_USERNAME: ${{ secrets.UPSTREAM_PROXY_USERNAME }}
+      UPSTREAM_PROXY_PASSWORD: ${{ secrets.UPSTREAM_PROXY_PASSWORD }}
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-go@v3
