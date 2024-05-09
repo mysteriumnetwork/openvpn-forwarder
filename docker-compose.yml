@@ -9,20 +9,19 @@ services:
       --log.level=trace
       --proxy.bind=:8443
       --proxy.allow=0.0.0.0/0
-      --proxy.upstream-url=http://superproxy.com:8080
-      --proxy.user=
-      --proxy.pass=
+      --proxy.upstream-url=${UPSTREAM_PROXY_URL}
+      --proxy.user=${UPSTREAM_PROXY_USERNAME}
+      --proxy.pass=${UPSTREAM_PROXY_PASSWORD}
       --filter.zones=api.ipify.org
       --exclude.hostnames=ipify.org
     ports:
+    - "8000:8000"
     - "8443:8443"
 
   machine:
     build:
       context: .
       dockerfile: e2e/Dockerfile
-    volumes:
-      - .:/go/src/github.com/mysteriumnetwork/openvpn-forwarder
     cap_add:
     - NET_ADMIN
     - NET_RAW

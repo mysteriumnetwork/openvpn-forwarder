@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2024 The "MysteriumNetwork/openvpn-forwarder" Authors.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 package metrics
 
 import (
@@ -7,16 +24,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-var _ proxy.Listener = (*Service)(nil)
-
-type Service struct {
+type service struct {
 	proxyRequestDuration              *prometheus.HistogramVec
 	proxyNumberOfLiveConnecions       *prometheus.GaugeVec
-	proxyNumberOfIncommingConnections *prometheus.CounterVec
 	proxyNumberOfProcessedConnections *prometheus.CounterVec
 }
 
-func NewMetricsService() (*Service, error) {
+// NewMetricsService creates instance of metrics service.
+func NewMetricsService() (*service, error) {
 	proxyRequestDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "proxy_request_duration",
 		Help: "Proxy request duration in seconds",
@@ -35,15 +50,6 @@ func NewMetricsService() (*Service, error) {
 		return nil, err
 	}
 
-	proxyNumberOfIncommingConnections := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "proxy_number_of_incomming_connections",
-		Help: "Number of incomming connections (failed and successful)",
-	}, []string{})
-
-	if err := prometheus.Register(proxyNumberOfIncommingConnections); err != nil {
-		return nil, err
-	}
-
 	proxyNumberOfProcessedConnections := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "proxy_number_of_processed_connections",
 		Help: "Number of incmming connections which were succesfully assigned and processed",
@@ -53,15 +59,14 @@ func NewMetricsService() (*Service, error) {
 		return nil, err
 	}
 
-	return &Service{
+	return &service{
 		proxyRequestDuration:              proxyRequestDuration,
 		proxyNumberOfLiveConnecions:       proxyNumberOfLiveConnections,
-		proxyNumberOfIncommingConnections: proxyNumberOfIncommingConnections,
 		proxyNumberOfProcessedConnections: proxyNumberOfProcessedConnections,
 	}, nil
 }
 
-func (s *Service) ProxyHandlerMiddleware(next func(c *proxy.Context)) func(c *proxy.Context) {
+func (s *service) ProxyHandlerMiddleware(next func(c *proxy.Context)) func(c *proxy.Context) {
 	return func(c *proxy.Context) {
 		startTime := time.Now()
 
@@ -83,8 +88,4 @@ func (s *Service) ProxyHandlerMiddleware(next func(c *proxy.Context)) func(c *pr
 			"request_type": c.RequestType(),
 		}).Inc()
 	}
-}
-
-func (s *Service) OnProxyConnectionAccept() {
-	s.proxyNumberOfIncommingConnections.With(prometheus.Labels{}).Inc()
 }

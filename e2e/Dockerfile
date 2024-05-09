@@ -1,8 +1,7 @@
-FROM golang:1.18-alpine
+FROM golang:1.21-alpine
 
 # Install packages
 RUN apk add --update --no-cache bash git gcc musl-dev make iptables bind-tools curl
 
-# Install application
-WORKDIR /go/src/github.com/mysteriumnetwork/openvpn-forwarder
-ADD . .
+# Waiting for E2E tests to be executed
+ENTRYPOINT ["tail", "-f", "/dev/null"]

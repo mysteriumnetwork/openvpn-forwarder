@@ -35,11 +35,7 @@ import (
 	netproxy "golang.org/x/net/proxy"
 )
 
-type HandlerMiddleware func(func(c *Context)) func(*Context)
-
-type Listener interface {
-	OnProxyConnectionAccept()
-}
+type handlerMiddleware func(func(c *Context)) func(*Context)
 
 type domainTracker interface {
 	Inc(domain string)
@@ -52,9 +48,7 @@ type proxyServer struct {
 	sm                StickyMapper
 	dt                domainTracker
 	portMap           map[string]string
-	handlerMiddleware HandlerMiddleware
-
-	listeners []Listener
+	handlerMiddleware handlerMiddleware
 }
 
 // StickyMapper represent connection stickiness storage.
@@ -71,7 +65,7 @@ func NewServer(
 	mapper StickyMapper,
 	dt domainTracker,
 	portMap map[string]string,
-	handlerMiddleware HandlerMiddleware,
+	handlerMiddleware handlerMiddleware,
 ) *proxyServer {
 	return &proxyServer{
 		allowedSubnets:    allowedSubnets,
@@ -84,6 +78,7 @@ func NewServer(
 	}
 }
 
+// ListenAndServe starts proxy server.
 func (s *proxyServer) ListenAndServe(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -99,10 +94,6 @@ func (s *proxyServer) ListenAndServe(addr string) error {
 	go s.handler(httpsL, s.serveTLS, "https")
 
 	return m.Serve()
-}
-
-func (s *proxyServer) AddListener(listener Listener) {
-	s.listeners = append(s.listeners, listener)
 }
 
 func (s *proxyServer) handler(l net.Listener, f func(c *Context), scheme string) {
@@ -132,8 +123,6 @@ func (s *proxyServer) handler(l net.Listener, f func(c *Context), scheme string)
 			s.logError(fmt.Sprintf("Error accepting new connection. %v", err), &c)
 			continue
 		}
-
-		s.sendOnProxyConnectionAccept()
 
 		clientAddrAllowed := false
 		for _, subnet := range s.allowedSubnets {
@@ -282,12 +271,8 @@ func (s *proxyServer) connectTo(c *Context, remoteHost string) (conn io.ReadWrit
 	return conn, nil
 }
 
-func (s *proxyServer) sendOnProxyConnectionAccept() {
-	for _, listener := range s.listeners {
-		go listener.OnProxyConnectionAccept()
-	}
-}
-
+// SO_ORIGINAL_DST get the original destination for the socket when redirect by linux iptables
+// refer to https://raw.githubusercontent.com/missdeer/avege/master/src/inbound/redir/redir_iptables.go
 const SO_ORIGINAL_DST = 0x50
 
 // getOriginalDst retrieves the original destination address from

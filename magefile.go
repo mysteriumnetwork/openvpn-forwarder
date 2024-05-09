@@ -24,9 +24,6 @@ import (
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
 	"github.com/mysteriumnetwork/go-ci/commands"
-
-	// mage:import
-	_ "github.com/mysteriumnetwork/openvpn-forwarder/ci/commands"
 )
 
 const buildPath = "./build/forwarder"
@@ -53,6 +50,11 @@ func Run() error {
 // Runs the test suite against the repo
 func Test() error {
 	return commands.Test("./...")
+}
+
+// TestE2E runs end-to-end test
+func TestE2E() (err error) {
+	return sh.RunV("go", "test", "-v", "-tags=e2e", "./e2e/...")
 }
 
 // Checks that the source is compliant with go vet

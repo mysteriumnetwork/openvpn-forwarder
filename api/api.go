@@ -18,11 +18,11 @@
 package api
 
 import (
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type mapping struct {

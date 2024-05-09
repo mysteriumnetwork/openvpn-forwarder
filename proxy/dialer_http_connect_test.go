@@ -33,7 +33,7 @@ func Test_dialerHTTPConnect_DialCreatesValidRequest(t *testing.T) {
 	server.run()
 	defer server.stop()
 
-	dialer := &dialerHTTPConnect{forwardDialer: DialerDirect, forwardAddress: ":6969"}
+	dialer := &dialerHTTPConnect{forwardDialer: DialerDirect, forwardURL: &url.URL{Host: ":6969"}}
 	conn, err := dialer.Dial("tcp", "domain.com:80")
 	assert.NotNil(t, conn)
 	assert.NoError(t, err)
