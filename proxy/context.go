@@ -31,7 +31,7 @@ type Context struct {
 	destinationAddress string
 }
 
-// RequestType HTTP or HTTPS
+// RequestType HTTP or HTTPS.
 func (c Context) RequestType() string {
 	return c.scheme
 }
