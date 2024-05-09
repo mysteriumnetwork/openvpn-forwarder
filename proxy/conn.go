@@ -23,17 +23,26 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-var proxyRequestData = prometheus.NewCounterVec(prometheus.CounterOpts{
-	Name: "proxy_request_data",
-	Help: "Proxy request data in bytes",
-}, []string{"request_type", "direction"})
+var (
+	proxyRequestData = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "proxy_request_data",
+		Help: "Proxy request data in bytes",
+	}, []string{"request_type", "direction"})
+
+	proxyNumberOfIncommingConnections = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "proxy_number_of_incomming_connections",
+		Help: "Number of incomming connections (failed and successful)",
+	}, []string{})
+)
 
 func init() {
-	prometheus.MustRegister(proxyRequestData)
+	prometheus.MustRegister(proxyRequestData, proxyNumberOfIncommingConnections)
 }
 
 // NewConn returns net.Conn wrapped with metrics.
 func NewConn(conn net.Conn, context *Context) *Conn {
+	proxyNumberOfIncommingConnections.With(prometheus.Labels{}).Inc()
+
 	return &Conn{
 		Conn:    conn,
 		Context: context,

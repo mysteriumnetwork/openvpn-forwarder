@@ -124,7 +124,6 @@ func main() {
 	}
 
 	proxyServer := proxy.NewServer(allowedSubnets, allowedIPs, dialer, sm, domainTracer, portMap, metricService.ProxyHandlerMiddleware)
-	proxyServer.AddListener(metricService)
 
 	var wg sync.WaitGroup
 	for p := range portMap {

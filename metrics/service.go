@@ -24,16 +24,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-var _ proxy.Listener = (*Service)(nil)
-
-type Service struct {
+type service struct {
 	proxyRequestDuration              *prometheus.HistogramVec
 	proxyNumberOfLiveConnecions       *prometheus.GaugeVec
-	proxyNumberOfIncommingConnections *prometheus.CounterVec
 	proxyNumberOfProcessedConnections *prometheus.CounterVec
 }
 
-func NewMetricsService() (*Service, error) {
+// NewMetricsService creates instance of metrics service.
+func NewMetricsService() (*service, error) {
 	proxyRequestDuration := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name: "proxy_request_duration",
 		Help: "Proxy request duration in seconds",
@@ -52,15 +50,6 @@ func NewMetricsService() (*Service, error) {
 		return nil, err
 	}
 
-	proxyNumberOfIncommingConnections := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "proxy_number_of_incomming_connections",
-		Help: "Number of incomming connections (failed and successful)",
-	}, []string{})
-
-	if err := prometheus.Register(proxyNumberOfIncommingConnections); err != nil {
-		return nil, err
-	}
-
 	proxyNumberOfProcessedConnections := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "proxy_number_of_processed_connections",
 		Help: "Number of incmming connections which were succesfully assigned and processed",
@@ -70,15 +59,14 @@ func NewMetricsService() (*Service, error) {
 		return nil, err
 	}
 
-	return &Service{
+	return &service{
 		proxyRequestDuration:              proxyRequestDuration,
 		proxyNumberOfLiveConnecions:       proxyNumberOfLiveConnections,
-		proxyNumberOfIncommingConnections: proxyNumberOfIncommingConnections,
 		proxyNumberOfProcessedConnections: proxyNumberOfProcessedConnections,
 	}, nil
 }
 
-func (s *Service) ProxyHandlerMiddleware(next func(c *proxy.Context)) func(c *proxy.Context) {
+func (s *service) ProxyHandlerMiddleware(next func(c *proxy.Context)) func(c *proxy.Context) {
 	return func(c *proxy.Context) {
 		startTime := time.Now()
 
@@ -100,8 +88,4 @@ func (s *Service) ProxyHandlerMiddleware(next func(c *proxy.Context)) func(c *pr
 			"request_type": c.RequestType(),
 		}).Inc()
 	}
-}
-
-func (s *Service) OnProxyConnectionAccept() {
-	s.proxyNumberOfIncommingConnections.With(prometheus.Labels{}).Inc()
 }
