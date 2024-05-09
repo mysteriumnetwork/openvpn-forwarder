@@ -33,15 +33,18 @@ func init() {
 }
 
 // NewConn returns net.Conn wrapped with metrics.
-func NewConn(conn net.Conn) *Conn {
+func NewConn(conn net.Conn, context *Context) *Conn {
 	return &Conn{
-		Conn: conn,
+		Conn:    conn,
+		Context: context,
 	}
 }
 
 // Conn wraps net.Conn with intercepts of read/write events.
 type Conn struct {
 	net.Conn
+
+	Context *Context
 }
 
 // Read bytes from net.Conn and count read bytes
@@ -49,7 +52,7 @@ func (c Conn) Read(b []byte) (n int, err error) {
 	count, err := c.Conn.Read(b)
 
 	proxyRequestData.MustCurryWith(prometheus.Labels{
-		"request_type": "HTTPS",
+		"request_type": c.Context.RequestType(),
 	}).WithLabelValues("received").Add(float64(count))
 
 	return count, err
@@ -60,7 +63,7 @@ func (c Conn) Write(b []byte) (n int, err error) {
 	count, err := c.Conn.Write(b)
 
 	proxyRequestData.MustCurryWith(prometheus.Labels{
-		"request_type": "HTTPS",
+		"request_type": c.Context.RequestType(),
 	}).WithLabelValues("sent").Add(float64(count))
 
 	return count, err

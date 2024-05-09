@@ -35,7 +35,7 @@ import (
 	netproxy "golang.org/x/net/proxy"
 )
 
-type HandlerMiddleware func(func(c *Context), string) func(*Context)
+type HandlerMiddleware func(func(c *Context)) func(*Context)
 
 type Listener interface {
 	OnProxyConnectionAccept()
@@ -95,16 +95,8 @@ func (s *proxyServer) ListenAndServe(addr string) error {
 	httpsL := m.Match(cmux.TLS())
 	httpL := m.Match(cmux.HTTP1Fast())
 
-	httpHandler := s.serveHTTP
-	tlsHandler := s.serveTLS
-
-	if s.handlerMiddleware != nil {
-		httpHandler = s.handlerMiddleware(httpHandler, "HTTP")
-		tlsHandler = s.handlerMiddleware(tlsHandler, "HTTPS")
-	}
-
-	go s.handler(httpL, httpHandler)
-	go s.handler(httpsL, tlsHandler)
+	go s.handler(httpL, s.serveHTTP, "http")
+	go s.handler(httpsL, s.serveTLS, "https")
 
 	return m.Serve()
 }
@@ -113,16 +105,20 @@ func (s *proxyServer) AddListener(listener Listener) {
 	s.listeners = append(s.listeners, listener)
 }
 
-func (s *proxyServer) handler(l net.Listener, f func(c *Context)) {
-	for {
-		var c Context
-		var err error
+func (s *proxyServer) handler(l net.Listener, f func(c *Context), scheme string) {
+	if s.handlerMiddleware != nil {
+		f = s.handlerMiddleware(f)
+	}
 
-		c.conn, err = l.Accept()
-		s.sendOnProxyConnectionAccept()
-		connMux, ok := c.conn.(*cmux.MuxConn)
+	for {
+		conn, err := l.Accept()
+		c := Context{}
+		c.scheme = scheme
+		c.conn = NewConn(conn, &c)
+
+		connMux, ok := conn.(*cmux.MuxConn)
 		if !ok {
-			err = fmt.Errorf("unsupported connection: %T", c.conn)
+			err = fmt.Errorf("unsupported connection: %T", conn)
 		}
 		connTCP, ok := connMux.Conn.(*net.TCPConn)
 		if !ok {
@@ -131,12 +127,13 @@ func (s *proxyServer) handler(l net.Listener, f func(c *Context)) {
 		clientAddr, ok := connTCP.RemoteAddr().(*net.TCPAddr)
 		if !ok {
 			err = fmt.Errorf("non-TCP address: %T", connTCP.RemoteAddr())
-			continue
 		}
 		if err != nil {
 			s.logError(fmt.Sprintf("Error accepting new connection. %v", err), &c)
 			continue
 		}
+
+		s.sendOnProxyConnectionAccept()
 
 		clientAddrAllowed := false
 		for _, subnet := range s.allowedSubnets {
@@ -263,11 +260,11 @@ func (s *proxyServer) serveTLS(c *Context) {
 	io.Copy(tlsConn, conn)
 }
 
-func (s *proxyServer) connectTo(c *Context, remoteHost string) (*Conn, error) {
+func (s *proxyServer) connectTo(c *Context, remoteHost string) (conn io.ReadWriteCloser, err error) {
 	domain := strings.Split(remoteHost, ":")
 	s.dt.Inc(domain[0])
 
-	conn, err := s.dialer.Dial("tcp", remoteHost)
+	conn, err = s.dialer.Dial("tcp", remoteHost)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to establish connection")
 	}
@@ -282,7 +279,7 @@ func (s *proxyServer) connectTo(c *Context, remoteHost string) (*Conn, error) {
 		}
 	}
 
-	return NewConn(conn), nil
+	return conn, nil
 }
 
 func (s *proxyServer) sendOnProxyConnectionAccept() {

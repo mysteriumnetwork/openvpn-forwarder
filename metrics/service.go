@@ -1,9 +1,10 @@
 package metrics
 
 import (
+	"time"
+
 	"github.com/mysteriumnetwork/openvpn-forwarder/proxy"
 	"github.com/prometheus/client_golang/prometheus"
-	"time"
 )
 
 var _ proxy.Listener = (*Service)(nil)
@@ -60,26 +61,26 @@ func NewMetricsService() (*Service, error) {
 	}, nil
 }
 
-func (s *Service) ProxyHandlerMiddleware(next func(c *proxy.Context), proxyHandlerType string) func(c *proxy.Context) {
+func (s *Service) ProxyHandlerMiddleware(next func(c *proxy.Context)) func(c *proxy.Context) {
 	return func(c *proxy.Context) {
 		startTime := time.Now()
 
 		s.proxyNumberOfLiveConnecions.With(prometheus.Labels{
-			"request_type": proxyHandlerType,
+			"request_type": c.RequestType(),
 		}).Inc()
 
 		next(c)
 
 		s.proxyNumberOfLiveConnecions.With(prometheus.Labels{
-			"request_type": proxyHandlerType,
+			"request_type": c.RequestType(),
 		}).Dec()
 
 		s.proxyRequestDuration.With(prometheus.Labels{
-			"request_type": proxyHandlerType,
+			"request_type": c.RequestType(),
 		}).Observe(time.Since(startTime).Seconds())
 
 		s.proxyNumberOfProcessedConnections.With(prometheus.Labels{
-			"request_type": proxyHandlerType,
+			"request_type": c.RequestType(),
 		}).Inc()
 	}
 }

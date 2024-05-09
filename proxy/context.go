@@ -13,3 +13,8 @@ type Context struct {
 	destinationHost    string
 	destinationAddress string
 }
+
+// RequestType HTTP or HTTPS
+func (c Context) RequestType() string {
+	return c.scheme
+}
