@@ -44,7 +44,7 @@ require (
 	github.com/ugorji/go/codec v1.1.7 // indirect
 	golang.org/x/sys v0.15.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
-	google.golang.org/grpc v1.50.1 // indirect
+	google.golang.org/grpc v1.56.3 // indirect
 	google.golang.org/grpc/examples v0.0.0-20221116180207-817c1e8c417e // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/go-playground/validator.v8 v8.18.2 // indirect
