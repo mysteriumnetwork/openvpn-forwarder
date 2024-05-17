@@ -143,6 +143,9 @@ OR
 docker exec -it openvpn wget -q -O - "https://ipinfo.io/"
 ```
 
+## Metrics of traffic
+After your bind API with e.g. `--proxy.api-bind=127.0.0.1:8000```, Prometheus metrics are available on http://127.0.0.1:8000/metrics.
+
 ## Forward non-standard ports to OpenVPN forwarder
 By default, OpenVPN forwarder listen ':8443' port and sends traffic to the standard port only
  - `:80` for HTTP traffic

@@ -36,9 +36,9 @@ import (
 )
 
 var logLevel = flag.String("log.level", log.InfoStr, "Set the logging level (trace, debug, info, warn, error, critical)")
-var proxyAddr = flag.String("proxy.bind", ":8443", "Proxy address for incoming connections")
+var proxyAddr = flag.String("proxy.bind", ":8443", `Proxy address for incoming connections, by default "0.0.0.0:8443`)
 var proxyAllow = FlagArray("proxy.allow", `Proxy allows connection from these addresses only (separated by comma - "10.13.0.1,10.13.0.0/16")`)
-var proxyAPIAddr = flag.String("proxy.api-bind", ":8000", "HTTP proxy API address")
+var proxyAPIAddr = flag.String("proxy.api-bind", "127.0.0.1:8000", `HTTP proxy API address, by default "127.0.0.1:8000")`)
 var upstreamConfigs = FlagUpstreamConfig()
 var proxyMapPort = FlagArray(
 	"proxy.port-map",
