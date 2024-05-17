@@ -18,10 +18,13 @@
 package api
 
 import (
+	"net"
 	"net/http"
 	"time"
 
+	log "github.com/cihub/seelog"
 	"github.com/gin-gonic/gin"
+
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -39,7 +42,7 @@ type domainTracker interface {
 }
 
 // NewServer returns new instance of API server
-func NewServer(addr string, storage stickySaver, dt domainTracker) *http.Server {
+func NewServer(addr string, storage stickySaver, dt domainTracker) *apiServer {
 	gin.SetMode(gin.ReleaseMode)
 	ginEngine := gin.Default()
 
@@ -56,11 +59,30 @@ func NewServer(addr string, storage stickySaver, dt domainTracker) *http.Server 
 		})
 	}
 
-	return &http.Server{
-		Handler: ginEngine,
-		Addr:    addr,
+	return &apiServer{
+		httpServer: &http.Server{
+			Handler: ginEngine,
+			Addr:    addr,
 
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+		},
 	}
+}
+
+type apiServer struct {
+	httpServer *http.Server
+}
+
+// ListenAndServe starts API server.
+func (s *apiServer) ListenAndServe() error {
+	ln, err := net.Listen("tcp4", s.httpServer.Addr)
+	if err != nil {
+		return err
+	}
+	defer ln.Close()
+
+	log.Infof("Serving API on %s", ln.Addr().String())
+
+	return s.httpServer.Serve(ln)
 }

@@ -52,7 +52,7 @@ func NewMetricsService() (*service, error) {
 
 	proxyNumberOfProcessedConnections := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "proxy_number_of_processed_connections",
-		Help: "Number of incmming connections which were succesfully assigned and processed",
+		Help: "Number of incoming connections which were successfully assigned and processed",
 	}, []string{"request_type"})
 
 	if err := prometheus.Register(proxyNumberOfProcessedConnections); err != nil {

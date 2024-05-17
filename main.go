@@ -36,9 +36,9 @@ import (
 )
 
 var logLevel = flag.String("log.level", log.InfoStr, "Set the logging level (trace, debug, info, warn, error, critical)")
-var proxyAddr = flag.String("proxy.bind", ":8443", "Proxy address for incoming connections")
+var proxyAddr = flag.String("proxy.bind", ":8443", `Proxy address for incoming connections, by default "0.0.0.0:8443`)
 var proxyAllow = FlagArray("proxy.allow", `Proxy allows connection from these addresses only (separated by comma - "10.13.0.1,10.13.0.0/16")`)
-var proxyAPIAddr = flag.String("proxy.api-bind", ":8000", "HTTP proxy API address")
+var proxyAPIAddr = flag.String("proxy.api-bind", "127.0.0.1:8000", `HTTP proxy API address, by default "127.0.0.1:8000")`)
 var upstreamConfigs = FlagUpstreamConfig()
 var proxyMapPort = FlagArray(
 	"proxy.port-map",
@@ -56,6 +56,8 @@ func main() {
 	flag.Parse()
 	setLoggerFormat(*logLevel)
 
+	var wg sync.WaitGroup
+
 	sm, err := proxy.NewStickyMapper(*stickyStoragePath)
 	if err != nil {
 		_ = log.Criticalf("Failed to create sticky mapper, %v", err)
@@ -68,7 +70,15 @@ func main() {
 	}
 
 	apiServer := api.NewServer(*proxyAPIAddr, sm, domainTracer)
-	go apiServer.ListenAndServe()
+	wg.Add(1)
+	go func() {
+		if err := apiServer.ListenAndServe(); err != nil {
+			_ = log.Criticalf("Failed to start API: %v", err)
+			os.Exit(1)
+		}
+
+		wg.Done()
+	}()
 
 	var dialer netproxy.Dialer
 	for _, upstreamConfig := range upstreamConfigs.configs {
@@ -124,14 +134,11 @@ func main() {
 	}
 
 	proxyServer := proxy.NewServer(allowedSubnets, allowedIPs, dialer, sm, domainTracer, portMap, metricService.ProxyHandlerMiddleware)
-
-	var wg sync.WaitGroup
 	for p := range portMap {
 		wg.Add(1)
 		go func(p string) {
-			log.Infof("Serving HTTPS proxy on %s", p)
 			if err := proxyServer.ListenAndServe(":" + p); err != nil {
-				_ = log.Criticalf("Failed to listen http requests: %v", err)
+				_ = log.Criticalf("Failed to start HTTPS proxy: %v", err)
 				os.Exit(1)
 			}
 			wg.Done()

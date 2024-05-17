@@ -80,13 +80,14 @@ func NewServer(
 
 // ListenAndServe starts proxy server.
 func (s *proxyServer) ListenAndServe(addr string) error {
-	ln, err := net.Listen("tcp", addr)
+	ln, err := net.Listen("tcp4", addr)
 	if err != nil {
 		return errors.Wrap(err, "failed to listen http connections")
 	}
 
-	m := cmux.New(ln)
+	log.Infof("Serving HTTPS proxy on %s", ln.Addr().String())
 
+	m := cmux.New(ln)
 	httpsL := m.Match(cmux.TLS())
 	httpL := m.Match(cmux.HTTP1Fast())
 
