@@ -11,7 +11,7 @@ ADD . .
 RUN go run ci/mage.go build
 
 
-FROM alpine:3.9
+FROM alpine:3.19
 
 # Install packages
 RUN apk add --update --no-cache iptables bash
