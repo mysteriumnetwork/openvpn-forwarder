@@ -3,7 +3,7 @@
 IFS=',' read -ra ROUTES <<< "$EXTRA_ROUTES"
 for route in "${ROUTES[@]}"; do
     IFS=':' read -a args <<< "$route"
-    echo route add -net ${args[0]} gw ${args[1]}
+    ip route add ${args[0]} via ${args[1]}
 done
 
 exec /forwarder $@
